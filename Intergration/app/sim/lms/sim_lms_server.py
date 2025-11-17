@@ -53,13 +53,17 @@ bins_data = [
     {"whCode": "WH001", "areaCode": "A01", "areaName": "A区", "binCode": "A-02-03",
         "binDesc": "A区-02排-03层", "binQty": 15000.0, "binStatus": "1"},
     {"whCode": "WH001", "areaCode": "B01", "areaName": "B区", "binCode": "B-01-01",
-        "binDesc": "B区-01排-01层", "binQty": 20000.0, "binStatus": "2"},
+        "binDesc": "B区-01排-01层", "binQty": 20000.0, "binStatus": "1"},
     {"whCode": "WH002", "areaCode": "C01", "areaName": "C区", "binCode": "C-01-02",
-        "binDesc": "C区-01排-02层", "binQty": 8000.0, "binStatus": "1"},
+        "binDesc": "C区-01排-02层", "binQty": 8000.0, "binStatus": "2"},
     {"whCode": "WH002", "areaCode": "D01", "areaName": "D区", "binCode": "D-02-03",
-        "binDesc": "D区-02排-03层", "binQty": 12000.0, "binStatus": "3"},
+        "binDesc": "D区-02排-03层", "binQty": 12000.0, "binStatus": "2"},
     {"whCode": "WH003", "areaCode": "E01", "areaName": "E区", "binCode": "E-01-01",
-        "binDesc": "E区-01排-01层", "binQty": 18000.0, "binStatus": "4"}
+        "binDesc": "E区-01排-01层", "binQty": 18000.0, "binStatus": "2"},
+    {"whCode": "WH004", "areaCode": "G01", "areaName": "G区", "binCode": "G-01-01",
+        "binDesc": "G区-01排-01层", "binQty": 18000.0, "binStatus": "1"},
+    {"whCode": "WH004", "areaCode": "G01", "areaName": "G区", "binCode": "G-02-01",
+        "binDesc": "G区-02排-01层", "binQty": 18000.0, "binStatus": "1"}
 ]
 
 # 盘点任务数据
@@ -74,7 +78,7 @@ tasks_data = [
         "itemCode": "YC-ZHONGHUA",
         "itemDesc": "中华(硬盒)",
         "invQty": 150.0,
-        "qtyUnit": "条",
+        "qtyUnit": "箱",
         "countQty": 0.0,
         "status": "未盘点"
     },
@@ -88,7 +92,7 @@ tasks_data = [
         "itemCode": "YC-HUANGHE",
         "itemDesc": "黄鹤楼(软蓝)",
         "invQty": 200.0,
-        "qtyUnit": "条",
+        "qtyUnit": "箱",
         "countQty": 0.0,
         "status": "未盘点"
     },
@@ -102,7 +106,7 @@ tasks_data = [
         "itemCode": "YC-CAOYUAN",
         "itemDesc": "中华(软盒)",
         "invQty": 300.0,
-        "qtyUnit": "条",
+        "qtyUnit": "箱",
         "countQty": 0.0,
         "status": "未盘点"
     }

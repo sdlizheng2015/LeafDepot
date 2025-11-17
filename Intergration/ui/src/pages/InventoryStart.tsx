@@ -5,35 +5,20 @@ import { toast } from 'sonner';
 import { GATEWAY_URL } from '@/config/ip_address';
 import { useAuth } from '@/contexts/authContext';
 
-// 定义接口类型
-interface Warehouse {
-  id: string;
-  name: string;
+// 库位信息结构体
+interface BinItem {
+  id: number;
+  whCode: string;
+  areaCode: string;
+  areaName: string;
+  binCode: string;
+  binDesc: string;
+  binQty: string;
+  binStatus: string;
 }
 
-interface StorageArea {
-  id: string;
-  name: string;
-  warehouseId: string;
-}
-
-interface Location {
-  id: string;
-  name: string;
-  storageAreaId: string;
-}
-
-interface InventoryItem {
-  id: string;
-  productName: string;
-  specification: string;
-  quantity: number;
-  unit: string;
-  locationId: string;
-}
-
-// 定义盘点任务接口
-interface CountingTask {
+// 盘点任务结构体
+interface InventoryTask {
   taskNo: string;
   taskDetailId: string;
   binId: string;
@@ -51,30 +36,50 @@ interface CountingTask {
 export default function InventoryStart() {
   const navigate = useNavigate();
 
-  // 统一使用 useAuth 钩子
   const { authToken } = useAuth();
-  const [bins, setBins] = useState<any[]>([]);
-  const [tasks, setTasks] = useState<CountingTask[]>([]);
+  const [inventoryTasks, setInventoryTasks] = useState<InventoryTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskLoading, setTaskLoading] = useState(false);
-  const [inventoryData, setInventoryData] = useState<InventoryItem[]>([]);
+  const [binsData, setBinsData] = useState<BinItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // 新建盘点任务模态框状态
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
-  const [newTask, setNewTask] = useState<Omit<CountingTask, 'status'>>({
-    taskNo: 'T20251023005',
-    taskDetailId: 'DT20251025005',
+  const [newInventoryTask, setNewInventoryTask] = useState<Omit<InventoryTask, 'status'>>({
+    taskNo: 'T20251117001',
+    taskDetailId: 'DT20251117001',
     binId: 'BIN-005',
-    binDesc: 'A区-01排-02层',
-    binCode: 'A-01-02',
+    binDesc: 'G区-01排-01层',
+    binCode: 'G-01-01',
     itemId: 'ITEM005',
     itemCode: 'YC-ZHONGHUA',
     itemDesc: '中华(硬盒)',
     invQty: 120.0,
-    qtyUnit: '条',
+    qtyUnit: '箱',
     countQty: 0,
   });
+
+  // 库位状态
+  const binStatus = (status: string) => {
+    switch (status) {
+      case '1': return '未盘点';
+      case '2': return '已盘点';
+      case '3': return '未知';
+      case '3': return '异常库位状态';
+      default: return '未盘点';
+    }
+  };
+
+
+  // 盘点任务状态
+  const taskStatus = (status: string) => {
+    switch (status) {
+      case '1': return '未开始';
+      case '2': return '进行中';
+      case '3': return '已完成';
+      case '4': return '异常任务状态';
+      default: return '未开始';
+    }
+  };
 
   // 用于拖拽排序
   const dragItem = useRef<number | null>(null);
@@ -83,29 +88,14 @@ export default function InventoryStart() {
   // 用于管理选中任务
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
 
-  // 确保在数据更新后正确显示
+  // 库位信息更新显示
   useEffect(() => {
-    if (inventoryData.length > 0) {
+    if (binsData.length > 0) {
       // 确保首次渲染时显示数据
-      console.log("Inventory data updated:", inventoryData);
+      console.log("Inventory data updated:", binsData);
     }
-  }, [inventoryData]);
+  }, [binsData]);
 
-  // 确保在bins数据更新后正确设置inventoryData
-  useEffect(() => {
-    if (bins.length > 0) {
-      // 将库位数据转换为库存数据格式
-      const inventoryData = bins.map(bin => ({
-        id: bin.binCode,
-        productName: bin.binDesc,
-        specification: '库位',
-        quantity: bin.binQty,
-        unit: '个',
-        locationId: bin.binCode
-      }));
-      setInventoryData(inventoryData);
-    }
-  }, [bins]);
 
   // 获取库位信息
   const fetchBins = async (retryCount = 0): Promise<boolean> => {
@@ -133,7 +123,7 @@ export default function InventoryStart() {
         return false;
       }
       const data = await response.json();
-      setBins(data);
+      setBinsData(data);
       return true;
     } catch (error) {
       if (error.name === 'TimeoutError' || error.name === 'AbortError') {
@@ -147,8 +137,8 @@ export default function InventoryStart() {
     }
   };
 
-  // 获取盘点任务（已修改，数据直接显示在库存区域）
-  const fetchCountingTask = async () => {
+  // 获取盘点任务
+  const fetchInventoryTask = async () => {
     if (!authToken) {
       toast.error('未找到认证令牌，请重新登录');
       return;
@@ -182,10 +172,10 @@ export default function InventoryStart() {
       const data = await response.json();
       console.log('获取盘点任务成功:', data);
 
-      setTasks([...data]);
+      setInventoryTasks([...data]);
 
       // 保持原有库存数据，只更新盘点任务
-      // setInventoryData(inventoryData);
+      // setBinsData(binsData);
       toast.success('获取盘点任务成功');
       return data;
     } catch (error) {
@@ -205,8 +195,8 @@ export default function InventoryStart() {
     }
   };
 
-  // 获取当前库位信息（已修改，数据直接显示在库存区域）
-  const fetchInventoryData = async () => {
+  // 获取当前库位信息
+  const fetchbinData = async () => {
     setIsLoading(true);
     try {
       const success = await fetchBins(); // 获取库位信息
@@ -221,15 +211,7 @@ export default function InventoryStart() {
     }
   };
 
-  // 辅助函数（避免重复逻辑）
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case '1': return '正常';
-      case '2': return '预警';
-      case '3': return '异常';
-      default: return '已锁定';
-    }
-  };
+
 
   // 处理返回按钮点击
   const handleBack = () => {
@@ -246,7 +228,7 @@ export default function InventoryStart() {
     }
 
     // 从所有任务中筛选出选中的任务
-    const selectedTaskList = tasks.filter(task =>
+    const selectedTaskList = inventoryTasks.filter(task =>
       selectedTasks.includes(task.taskDetailId)
     );
 
@@ -322,12 +304,12 @@ export default function InventoryStart() {
         try {
           const content = e.target?.result as string;
           // 解析CSV内容
-          const tasks = parseCSVContent(content);
+          const inventoryTasks = parseCSVContent(content);
 
-          if (tasks.length > 0) {
+          if (inventoryTasks.length > 0) {
             // 添加到现有任务列表
-            setTasks(prevTasks => [...prevTasks, ...tasks]);
-            toast.success(`成功导入 ${tasks.length} 条盘点任务`);
+            setInventoryTasks(prevTasks => [...prevTasks, ...inventoryTasks]);
+            toast.success(`成功导入 ${inventoryTasks.length} 条盘点任务`);
           } else {
             toast.error('CSV文件中没有有效的盘点任务数据');
           }
@@ -353,9 +335,9 @@ export default function InventoryStart() {
   };
 
   // 解析CSV内容的辅助函数
-  const parseCSVContent = (content: string): CountingTask[] => {
+  const parseCSVContent = (content: string): InventoryTask[] => {
     const lines = content.split('\n');
-    const tasks: CountingTask[] = [];
+    const inventoryTasks: InventoryTask[] = [];
 
     // 跳过标题行（假设第一行是标题）
     for (let i = 1; i < lines.length; i++) {
@@ -366,7 +348,7 @@ export default function InventoryStart() {
       const columns = line.split(',').map(col => col.trim());
 
       if (columns.length >= 12) { // 确保有足够的列
-        const task: CountingTask = {
+        const task: InventoryTask = {
           taskNo: columns[1] || `TASK_${Date.now()}_${i}`,
           taskDetailId: columns[2] || `DETAIL_${Date.now()}_${i}`,
           binId: columns[3] || '',
@@ -378,51 +360,38 @@ export default function InventoryStart() {
           invQty: Number(columns[9]) || 0,
           qtyUnit: columns[10] || '个',
           countQty: Number(columns[11]) || 0,
-          status: mapStatus(columns[12] || '1')
+          status: taskStatus(columns[12] || '1')
         };
 
-        tasks.push(task);
+        inventoryTasks.push(task);
       }
     }
 
-    return tasks;
+    return inventoryTasks;
   };
 
-  // 状态映射辅助函数
-  const mapStatus = (status: string): string => {
-    const statusMap: { [key: string]: string } = {
-      '未盘点': '1',
-      '盘点中': '2',
-      '已完成': '3',
-      '正常': '1',
-      '预警': '2',
-      '异常': '3'
-    };
-
-    return statusMap[status] || '1';
-  };
 
   // 处理新建盘点任务
   const handleCreateTask = () => {
     // 确保所有必填字段都有值
-    if (!newTask.taskNo || !newTask.binDesc || !newTask.invQty || !newTask.qtyUnit) {
+    if (!newInventoryTask.taskNo || !newInventoryTask.binDesc || !newInventoryTask.invQty || !newInventoryTask.qtyUnit) {
       toast.error('请填写所有必填字段');
       return;
     }
     // 生成唯一的 taskDetailId
     const taskDetailId = `TASK_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     // 创建新的盘点任务
-    const newTaskItem: CountingTask = {
-      ...newTask,
+    const newTaskItem: InventoryTask = {
+      ...newInventoryTask,
       taskDetailId,
-      status: '1', // 默认状态为正常
+      status: '1', // 默认状态为未开始
     };
     // 添加到任务列表
-    setTasks([...tasks, newTaskItem]);
+    setInventoryTasks([...inventoryTasks, newTaskItem]);
     // 关闭模态框
     setIsCreateTaskModalOpen(false);
     // 清空表单
-    setNewTask({
+    setNewInventoryTask({
       taskNo: '',
       taskDetailId: '',
       binId: '',
@@ -440,7 +409,7 @@ export default function InventoryStart() {
 
   // 删除盘点任务
   const handleDeleteTask = (taskDetailId: string) => {
-    setTasks(tasks.filter(task => task.taskDetailId !== taskDetailId));
+    setInventoryTasks(inventoryTasks.filter(task => task.taskDetailId !== taskDetailId));
     // 同时从选中列表中移除
     setSelectedTasks(selectedTasks.filter(id => id !== taskDetailId));
     toast.success('盘点任务已删除');
@@ -448,11 +417,11 @@ export default function InventoryStart() {
 
   // 处理全选/全不选
   const handleSelectAll = () => {
-    const allSelected = tasks.every(task => selectedTasks.includes(task.taskDetailId));
+    const allSelected = inventoryTasks.every(task => selectedTasks.includes(task.taskDetailId));
     if (allSelected) {
       setSelectedTasks([]);
     } else {
-      setSelectedTasks(tasks.map(task => task.taskDetailId));
+      setSelectedTasks(inventoryTasks.map(task => task.taskDetailId));
     }
   };
 
@@ -482,11 +451,11 @@ export default function InventoryStart() {
     const dragIndex = dragItem.current;
     if (dragIndex === null || dragIndex === index) return;
 
-    const newTasks = [...tasks];
+    const newTasks = [...inventoryTasks];
     const [movedItem] = newTasks.splice(dragIndex, 1);
     newTasks.splice(index, 0, movedItem);
 
-    setTasks(newTasks);
+    setInventoryTasks(newTasks);
     dragItem.current = null;
   };
 
@@ -545,7 +514,7 @@ export default function InventoryStart() {
               <div className="space-y-6">
                 {/* 获取当前库位按钮 */}
                 <button
-                  onClick={fetchInventoryData}
+                  onClick={fetchbinData}
                   disabled={isLoading}
                   className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center mt-6"
                 >
@@ -561,7 +530,7 @@ export default function InventoryStart() {
                 </button>
                 {/* 获取LMS盘点任务按钮 */}
                 <button
-                  onClick={fetchCountingTask}
+                  onClick={fetchInventoryTask}
                   disabled={taskLoading}
                   className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center mt-6"
                 >
@@ -585,7 +554,7 @@ export default function InventoryStart() {
 
                 {/* 导入本地盘点任务按钮 */}
                 <button
-                  onClick={() => setIsImportLocalTask(true)}
+                  onClick={() => setIsImportLocalTask()}
                   className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center mt-6"
                 >
                   <i className="fa-solid fa-plus mr-2"></i> 导入本地盘点任务
@@ -603,9 +572,9 @@ export default function InventoryStart() {
             <div className="bg-white rounded-xl shadow-md border border-gray-100 h-full flex flex-col">
               <div className="p-6 border-b border-gray-100">
                 <h3 className="text-xl font-bold text-green-800 flex items-center">
-                  <i className="fa-solid fa-table mr-2 text-green-600"></i>库存数据
+                  <i className="fa-solid fa-table mr-2 text-green-600"></i>库位数据
                   <span className="ml-3 text-sm font-normal text-gray-500">
-                    (单位: 箱)
+                    (LMS系统)
                   </span>
                 </h3>
               </div>
@@ -618,7 +587,7 @@ export default function InventoryStart() {
                     <div className="w-16 h-16 border-4 border-green-200 border-t-green-700 rounded-full animate-spin mb-4"></div>
                     <p className="text-gray-500">正在获取数据...</p>
                   </div>
-                ) : inventoryData.length > 0 ? (
+                ) : binsData.length > 0 ? (
                   // 库位信息表格
                   <div className="overflow-x-auto mb-8">
                     <h4 className="text-lg font-semibold text-green-800 mb-4">库位信息</h4>
@@ -626,24 +595,26 @@ export default function InventoryStart() {
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">序号</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">描述</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数量</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">库位名称</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">库位编码</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最大存储数量</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单位</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">库位状态</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {inventoryData.map((item, index) => (
+                        {binsData.map((item, index) => (
                           <tr key={item.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{index + 1}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
-                                <div className="text-sm font-medium text-gray-900">{item.productName}</div>
+                                <div className="text-sm font-medium text-gray-900">{item.binDesc}</div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{item.specification}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{item.quantity}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{item.unit}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{item.binCode}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{item.binQty}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">箱</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{binStatus(item.binStatus)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -670,23 +641,23 @@ export default function InventoryStart() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           <input
                             type="checkbox"
-                            checked={tasks.length > 0 && selectedTasks.length === tasks.length}
+                            checked={inventoryTasks.length > 0 && selectedTasks.length === inventoryTasks.length}
                             onChange={handleSelectAll}
                             className="h-4 w-4 text-green-600 rounded border-gray-300"
                           />
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">序号</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">任务编号</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">库位描述</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">库存数量</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">盘点库位</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">历史库存数量</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单位</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {tasks.length > 0 ? (
-                        tasks.map((task, index) => (
+                      {inventoryTasks.length > 0 ? (
+                        inventoryTasks.map((task, index) => (
                           <tr
                             key={task.taskDetailId}
                             className="hover:bg-gray-50 transition-colors cursor-move"
@@ -709,7 +680,7 @@ export default function InventoryStart() {
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{task.invQty}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{task.qtyUnit}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                              {getStatusText(task.status)}
+                              {taskStatus(task.status)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               <button
@@ -733,10 +704,10 @@ export default function InventoryStart() {
                 </div>
               </div>
               {/* 底部操作栏 */}
-              {inventoryData.length > 0 && (
+              {binsData.length > 0 && (
                 <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
                   <div className="text-sm text-gray-500">
-                    库位信息共 <span className="font-medium text-green-700">{inventoryData.length}</span> 条记录
+                    库位信息共 <span className="font-medium text-green-700">{binsData.length}</span> 条记录
                   </div>
                   <div className="flex space-x-3">
                     <button className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors flex items-center">
@@ -789,8 +760,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.taskNo}
-                        onChange={(e) => setNewTask({ ...newTask, taskNo: e.target.value })}
+                        value={newInventoryTask.taskNo}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, taskNo: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入任务编号"
                       />
@@ -801,8 +772,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.binDesc}
-                        onChange={(e) => setNewTask({ ...newTask, binDesc: e.target.value })}
+                        value={newInventoryTask.binDesc}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, binDesc: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入库位描述"
                       />
@@ -815,8 +786,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="number"
-                        value={newTask.invQty}
-                        onChange={(e) => setNewTask({ ...newTask, invQty: Number(e.target.value) })}
+                        value={newInventoryTask.invQty}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, invQty: Number(e.target.value) })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入库存数量"
                       />
@@ -827,8 +798,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.qtyUnit}
-                        onChange={(e) => setNewTask({ ...newTask, qtyUnit: e.target.value })}
+                        value={newInventoryTask.qtyUnit}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, qtyUnit: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入单位"
                       />
@@ -841,8 +812,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.binId}
-                        onChange={(e) => setNewTask({ ...newTask, binId: e.target.value })}
+                        value={newInventoryTask.binId}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, binId: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入库位ID"
                       />
@@ -853,8 +824,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.binCode}
-                        onChange={(e) => setNewTask({ ...newTask, binCode: e.target.value })}
+                        value={newInventoryTask.binCode}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, binCode: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入库位编码"
                       />
@@ -867,8 +838,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.itemId}
-                        onChange={(e) => setNewTask({ ...newTask, itemId: e.target.value })}
+                        value={newInventoryTask.itemId}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, itemId: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入商品ID"
                       />
@@ -879,8 +850,8 @@ export default function InventoryStart() {
                       </label>
                       <input
                         type="text"
-                        value={newTask.itemCode}
-                        onChange={(e) => setNewTask({ ...newTask, itemCode: e.target.value })}
+                        value={newInventoryTask.itemCode}
+                        onChange={(e) => setNewInventoryTask({ ...newInventoryTask, itemCode: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         placeholder="请输入商品编码"
                       />
@@ -892,8 +863,8 @@ export default function InventoryStart() {
                     </label>
                     <input
                       type="text"
-                      value={newTask.itemDesc}
-                      onChange={(e) => setNewTask({ ...newTask, itemDesc: e.target.value })}
+                      value={newInventoryTask.itemDesc}
+                      onChange={(e) => setNewInventoryTask({ ...newInventoryTask, itemDesc: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                       placeholder="请输入商品描述"
                     />

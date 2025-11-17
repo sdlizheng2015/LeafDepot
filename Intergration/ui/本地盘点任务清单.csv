@@ -1,0 +1,2 @@
+序号,taskNo,taskDetailId,binId,binDesc,binCode,itemId,itemCode,itemDesc,invQty,qtyUnit,countQty,status
+1,T20251117002,DT20251117001,BIN-006,G区-02排-01层,C-02-01,ITEM006,YC-ZHONGHUA,中华（硬盒）,200,箱,0,1
