@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { GATEWAY_URL } from "@/config/ip_address";
 import { useAuth } from "@/contexts/authContext";
+import { addOperationLog } from "@/lib/operationLog";
 
 // 库位信息结构体
 interface BinItem {
@@ -36,10 +37,10 @@ interface InventoryTask {
   rcsCode: string;
 }
 
-  export default function InventoryStart() {
+export default function InventoryStart() {
   const navigate = useNavigate();
 
-  const { authToken } = useAuth();
+  const { authToken, userName } = useAuth();
   const [inventoryTasks, setInventoryTasks] = useState<InventoryTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskLoading, setTaskLoading] = useState(false);
@@ -50,39 +51,41 @@ interface InventoryTask {
   const [selectedBins, setSelectedBins] = useState<string[]>([]);
   // 新增状态：任务号输入框 - 作为全局变量
   const [taskNoInput, setTaskNoInput] = useState<string>("");
-  
+
   // 新增状态：仓库和储区选择
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>("all");
   const [selectedArea, setSelectedArea] = useState<string>("all");
-  
+
   // 新增状态：确认对话框和消息提示
   const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
   const [showMessage, setShowMessage] = useState<boolean>(false);
-  const [messageType, setMessageType] = useState<'success' | 'error' | 'info'>('info');
-  const [messageContent, setMessageContent] = useState<string>('');
+  const [messageType, setMessageType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const [messageContent, setMessageContent] = useState<string>("");
 
   // 生成任务号函数
   const generateTaskNo = () => {
     // 前缀（服务器名称缩写，这里使用衡水的缩写HS）
     const prefix = "HS";
-    
+
     // 获取当前日期并格式化为YYYYMMDD
     const now = new Date();
     const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
     const dateStr = `${year}${month}${day}`;
-    
+
     // 从本地存储获取今日最后使用的序号
     const storageKey = `lastTaskNoIndex_${dateStr}`;
     const lastIndex = localStorage.getItem(storageKey);
     const currentIndex = lastIndex ? parseInt(lastIndex, 10) + 1 : 1;
-    
+
     // 保存当前序号回本地存储
     localStorage.setItem(storageKey, String(currentIndex));
-    
+
     // 生成完整的任务号
-    const taskNo = `${prefix}${dateStr}${String(currentIndex).padStart(2, '0')}`;
+    const taskNo = `${prefix}${dateStr}${String(currentIndex).padStart(2, "0")}`;
     return taskNo;
   };
 
@@ -99,7 +102,7 @@ interface InventoryTask {
       tobaccoQty: 50,
       tobaccoCode: "C001",
       tobaccoName: "黄鹤楼(硬盒)",
-      rcsCode: "RCS001"
+      rcsCode: "RCS001",
     },
     {
       whCode: "WH001",
@@ -112,7 +115,7 @@ interface InventoryTask {
       tobaccoQty: 35,
       tobaccoCode: "C002",
       tobaccoName: "玉溪(软盒)",
-      rcsCode: "RCS002"
+      rcsCode: "RCS002",
     },
     {
       whCode: "WH001",
@@ -125,7 +128,7 @@ interface InventoryTask {
       tobaccoQty: 28,
       tobaccoCode: "C003",
       tobaccoName: "荷花(细支)",
-      rcsCode: "RCS003"
+      rcsCode: "RCS003",
     },
     {
       whCode: "WH001",
@@ -138,7 +141,7 @@ interface InventoryTask {
       tobaccoQty: 42,
       tobaccoCode: "C004",
       tobaccoName: "利群(新版)",
-      rcsCode: "RCS004"
+      rcsCode: "RCS004",
     },
     {
       whCode: "WH002",
@@ -151,7 +154,7 @@ interface InventoryTask {
       tobaccoQty: 60,
       tobaccoCode: "C005",
       tobaccoName: "ESSE(蓝盒)",
-      rcsCode: "RCS005"
+      rcsCode: "RCS005",
     },
     {
       whCode: "WH002",
@@ -164,7 +167,7 @@ interface InventoryTask {
       tobaccoQty: 45,
       tobaccoCode: "C006",
       tobaccoName: "云烟(印象)",
-      rcsCode: "RCS006"
+      rcsCode: "RCS006",
     },
     {
       whCode: "WH002",
@@ -177,7 +180,7 @@ interface InventoryTask {
       tobaccoQty: 30,
       tobaccoCode: "C007",
       tobaccoName: "南京(金陵十二钗)",
-      rcsCode: "RCS007"
+      rcsCode: "RCS007",
     },
     {
       whCode: "WH002",
@@ -190,8 +193,8 @@ interface InventoryTask {
       tobaccoQty: 55,
       tobaccoCode: "C008",
       tobaccoName: "红塔山(经典)",
-      rcsCode: "RCS008"
-    }
+      rcsCode: "RCS008",
+    },
   ];
 
   // 库位状态
@@ -250,7 +253,11 @@ interface InventoryTask {
   }, [binsData]);
 
   // 获取库位信息，支持仓库和储区筛选
-  const fetchBins = async (warehouse: string, area: string, retryCount = 0): Promise<boolean> => {
+  const fetchBins = async (
+    warehouse: string,
+    area: string,
+    retryCount = 0,
+  ): Promise<{ success: boolean; count: number }> => {
     // 即使没有authToken也继续执行，使用模拟数据
     if (!authToken) {
       toast.warning("未找到认证令牌，将使用模拟数据");
@@ -258,65 +265,80 @@ interface InventoryTask {
     setIsLoading(true);
     try {
       // 模拟API请求，使用假数据并应用筛选
-      setTimeout(() => {
-        // 根据选择的仓库和储区进行筛选
-        let filteredData = [...mockBinData];
-        
-        if (warehouse !== "all") {
-          filteredData = filteredData.filter(item => item.whCode === warehouse);
-        }
-        
-        if (area !== "all") {
-          filteredData = filteredData.filter(item => item.areaCode === area);
-        }
-        
-        setBinsData(filteredData);
-        setIsLoading(false);
-        setSelectedBins([]);
-        
-        // 显示筛选结果信息
-        const filterInfo = [];
-        if (warehouse !== "all") filterInfo.push(`${warehouse}仓库`);
-        if (area !== "all") filterInfo.push(`${area}区`);
-        
-        const filterText = filterInfo.length > 0 
-          ? `（${filterInfo.join("，")}）` 
-          : "";
-          
-        toast.success(`成功获取库位信息${filterText}，共 ${filteredData.length} 条记录`);
-      }, 800);
-      return true;
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          // 根据选择的仓库和储区进行筛选
+          let filteredData = [...mockBinData];
+
+          if (warehouse !== "all") {
+            filteredData = filteredData.filter(
+              (item) => item.whCode === warehouse,
+            );
+          }
+
+          if (area !== "all") {
+            filteredData = filteredData.filter(
+              (item) => item.areaCode === area,
+            );
+          }
+
+          setBinsData(filteredData);
+          setIsLoading(false);
+          setSelectedBins([]);
+
+          // 显示筛选结果信息
+          const filterInfo = [];
+          if (warehouse !== "all") filterInfo.push(`${warehouse}仓库`);
+          if (area !== "all") filterInfo.push(`${area}区`);
+
+          const filterText =
+            filterInfo.length > 0 ? `（${filterInfo.join("，")}）` : "";
+
+          toast.success(
+            `成功获取库位信息${filterText}，共 ${filteredData.length} 条记录`,
+          );
+
+          resolve({ success: true, count: filteredData.length });
+        }, 800);
+      });
     } catch (error) {
       toast.error("请求超时，使用模拟数据");
-      
-      // 发生错误时，使用模拟数据并应用筛选
-      setTimeout(() => {
-        let filteredData = [...mockBinData];
-        
-        if (warehouse !== "all") {
-          filteredData = filteredData.filter(item => item.whCode === warehouse);
-        }
-        
-        if (area !== "all") {
-          filteredData = filteredData.filter(item => item.areaCode === area);
-        }
-        
-        setBinsData(filteredData);
-        setSelectedBins([]);
-        setIsLoading(false);
-        
-        const filterInfo = [];
-        if (warehouse !== "all") filterInfo.push(`${warehouse}仓库`);
-        if (area !== "all") filterInfo.push(`${area}区`);
-        
-        const filterText = filterInfo.length > 0 
-          ? `（${filterInfo.join("，")}）` 
-          : "";
-          
-        toast.info(`已使用模拟数据${filterText}，共 ${filteredData.length} 条记录`);
-      }, 500);
 
-      return true;
+      // 发生错误时，使用模拟数据并应用筛选
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          let filteredData = [...mockBinData];
+
+          if (warehouse !== "all") {
+            filteredData = filteredData.filter(
+              (item) => item.whCode === warehouse,
+            );
+          }
+
+          if (area !== "all") {
+            filteredData = filteredData.filter(
+              (item) => item.areaCode === area,
+            );
+          }
+
+          setBinsData(filteredData);
+          setSelectedBins([]);
+          setIsLoading(false);
+
+          const filterInfo = [];
+          if (warehouse !== "all") filterInfo.push(`${warehouse}仓库`);
+          if (area !== "all") filterInfo.push(`${area}区`);
+
+          const filterText =
+            filterInfo.length > 0 ? `（${filterInfo.join("，")}）` : "";
+
+          toast.info(
+            `已使用模拟数据${filterText}，共 ${filteredData.length} 条记录`,
+          );
+
+          resolve({ success: true, count: filteredData.length });
+        }, 500);
+      });
     } finally {
       // 不在这里设置isLoading为false，而是在模拟数据加载完成后设置
     }
@@ -333,11 +355,13 @@ interface InventoryTask {
       // 模拟API请求延迟
       setTimeout(() => {
         // 使用库位数据的前3条作为模拟的盘点任务
-        const mockTasks: InventoryTask[] = mockBinData.slice(0, 3).map(bin => ({
-          ...bin,
-          taskID: `TASK_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        }));
-        
+        const mockTasks: InventoryTask[] = mockBinData
+          .slice(0, 3)
+          .map((bin) => ({
+            ...bin,
+            taskID: `TASK_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          }));
+
         setInventoryTasks(mockTasks);
         setTaskLoading(false);
         toast.success("成功获取盘点任务");
@@ -345,14 +369,16 @@ interface InventoryTask {
     } catch (error) {
       console.error("获取盘点任务失败:", error);
       toast.error("获取盘点任务失败，使用模拟数据");
-      
+
       // 发生错误时，使用模拟数据
       setTimeout(() => {
-        const mockTasks: InventoryTask[] = mockBinData.slice(0, 3).map(bin => ({
-          ...bin,
-          taskID: `TASK_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        }));
-        
+        const mockTasks: InventoryTask[] = mockBinData
+          .slice(0, 3)
+          .map((bin) => ({
+            ...bin,
+            taskID: `TASK_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          }));
+
         setInventoryTasks(mockTasks);
         setTaskLoading(false);
         toast.info("已使用模拟任务数据");
@@ -364,11 +390,43 @@ interface InventoryTask {
   const fetchbinData = async () => {
     setIsLoading(true);
     try {
-      const success = await fetchBins(selectedWarehouse, selectedArea); // 传递筛选条件
+      const result = await fetchBins(selectedWarehouse, selectedArea); // 传递筛选条件
+
+      // 记录操作日志
+      if (result.success) {
+        addOperationLog({
+          operation_type: "inventory",
+          user_id: authToken || undefined,
+          user_name: userName || undefined,
+          action: "获取库位信息",
+          target: `${selectedWarehouse === "all" ? "全部仓库" : selectedWarehouse}/${selectedArea === "all" ? "全部储区" : selectedArea}`,
+          status: "success",
+          details: {
+            warehouse: selectedWarehouse,
+            area: selectedArea,
+            bin_count: result.count,
+          },
+        });
+      }
     } catch (error) {
       console.error("获取库存数据失败:", error);
       toast.error("获取库存数据失败");
       setIsLoading(false);
+
+      // 记录失败的操作日志
+      addOperationLog({
+        operation_type: "inventory",
+        user_id: authToken || undefined,
+        user_name: userName || undefined,
+        action: "获取库位信息",
+        target: `${selectedWarehouse}/${selectedArea}`,
+        status: "failed",
+        details: {
+          warehouse: selectedWarehouse,
+          area: selectedArea,
+          error: error instanceof Error ? error.message : "未知错误",
+        },
+      });
     }
   };
 
@@ -395,14 +453,14 @@ interface InventoryTask {
       status: "pending", // pending, in-progress, completed
       totalItems: inventoryTasks.reduce(
         (sum, task) => sum + task.tobaccoQty,
-        0
+        0,
       ),
       // 添加任务统计信息
       stats: {
         totalBins: inventoryTasks.length,
         totalQuantity: inventoryTasks.reduce(
           (sum, task) => sum + task.tobaccoQty,
-          0
+          0,
         ),
         uniqueItems: new Set(inventoryTasks.map((task) => task.tobaccoName))
           .size,
@@ -427,9 +485,48 @@ interface InventoryTask {
     } catch (error) {
       console.error("生成任务清单失败:", error);
       toast.error("生成任务清单失败，请重试");
+      return null;
     }
   };
-  
+
+  // 生成任务清单并记录日志
+  const handleCreateManifest = () => {
+    const manifest = createTaskMainfest();
+
+    if (manifest) {
+      // 记录操作日志
+      addOperationLog({
+        operation_type: "inventory",
+        user_id: authToken || undefined,
+        user_name: userName || undefined,
+        action: "生成任务清单",
+        target: taskNoInput || "未命名任务",
+        status: "success",
+        details: {
+          task_no: taskNoInput,
+          task_count: inventoryTasks.length,
+          total_quantity: manifest.totalItems,
+          unique_items: manifest.stats.uniqueItems,
+          unique_locations: manifest.stats.uniqueLocations,
+        },
+      });
+    } else {
+      // 记录失败的操作日志
+      addOperationLog({
+        operation_type: "inventory",
+        user_id: authToken || undefined,
+        user_name: userName || undefined,
+        action: "生成任务清单",
+        target: taskNoInput || "未命名任务",
+        status: "failed",
+        details: {
+          task_no: taskNoInput,
+          error: "生成任务清单失败",
+        },
+      });
+    }
+  };
+
   // 开始盘点 - 将任务编号传递给下一个页面
   const handleStartInventory = () => {
     // 检查是否有任务清单
@@ -444,7 +541,7 @@ interface InventoryTask {
     if (manifest) {
       // 保存任务编号到本地存储，作为全局变量
       localStorage.setItem("currentTaskNo", taskNoInput);
-      
+
       // 确保传递选中的库位信息给盘点进度页面
       const selectedLocation = {
         warehouseId: inventoryTasks[0].whCode,
@@ -452,8 +549,24 @@ interface InventoryTask {
         storageAreaId: inventoryTasks[0].areaCode,
         storageAreaName: inventoryTasks[0].areaName,
         locationId: inventoryTasks[0].binCode,
-        locationName: inventoryTasks[0].binDesc
+        locationName: inventoryTasks[0].binDesc,
       };
+
+      // 记录操作日志
+      addOperationLog({
+        operation_type: "inventory",
+        user_id: authToken || undefined,
+        user_name: userName || undefined,
+        action: "下发盘点任务",
+        target: taskNoInput,
+        status: "success",
+        details: {
+          task_no: taskNoInput,
+          task_count: inventoryTasks.length,
+          total_quantity: manifest.totalItems,
+          start_time: new Date().toISOString(),
+        },
+      });
 
       // 跳转到盘点进度页面，并传递任务编号、任务数据和选中的库位信息
       navigate("/inventory/progress", {
@@ -461,7 +574,7 @@ interface InventoryTask {
           taskNo: taskNoInput,
           inventoryTasks: inventoryTasks,
           taskManifest: manifest,
-          selectedLocation: selectedLocation
+          selectedLocation: selectedLocation,
         },
       });
     }
@@ -470,8 +583,8 @@ interface InventoryTask {
   // 删除盘点任务
   const handleDeleteTask = (taskID: string) => {
     // 确保只删除与传入的taskID完全匹配的任务
-    setInventoryTasks((prevTasks) => 
-      prevTasks.filter((task) => task.taskID !== taskID)
+    setInventoryTasks((prevTasks) =>
+      prevTasks.filter((task) => task.taskID !== taskID),
     );
     // 同时从选中列表中移除
     setSelectedTasks(selectedTasks.filter((id) => id !== taskID));
@@ -481,7 +594,7 @@ interface InventoryTask {
   // 处理全选/全不选（库位信息）
   const handleSelectAllBins = () => {
     const allSelected = binsData.every((bin) =>
-      selectedBins.includes(bin.binCode)
+      selectedBins.includes(bin.binCode),
     );
     if (allSelected) {
       setSelectedBins([]);
@@ -522,9 +635,13 @@ interface InventoryTask {
     }
 
     // 过滤掉已经在任务列表中的库位
-    const existingBinCodes = new Set(inventoryTasks.map(task => task.binCode));
-    const uniqueSelectedBins = selectedBins.filter(binCode => !existingBinCodes.has(binCode));
-    
+    const existingBinCodes = new Set(
+      inventoryTasks.map((task) => task.binCode),
+    );
+    const uniqueSelectedBins = selectedBins.filter(
+      (binCode) => !existingBinCodes.has(binCode),
+    );
+
     if (uniqueSelectedBins.length === 0) {
       toast.warning("所选库位已全部在盘点任务中");
       return;
@@ -556,7 +673,7 @@ interface InventoryTask {
           tobaccoQty: bin.tobaccoQty,
           tobaccoName: bin.tobaccoName,
           tobaccoCode: bin.tobaccoCode,
-          rcsCode: bin.rcsCode
+          rcsCode: bin.rcsCode,
         };
       })
       .filter((task): task is InventoryTask => task !== null);
@@ -646,81 +763,84 @@ interface InventoryTask {
           <p className="text-gray-600 mt-1">获取当前库位信息和盘点任务</p>
         </div>
         {/* 选择区域和数据展示区域 */}
-         <div className="flex flex-col lg:flex-row gap-8">
-           {/* 左侧操作区域 */}
-            <motion.div
-               initial={{ opacity: 0, x: -20 }}
-               animate={{ opacity: 1, x: 0 }}
-               transition={{ duration: 0.5 }}
-               className="lg:w-1/4"
-             >
-               <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 h-full flex flex-col">
-                 <h3 className="text-xl font-bold text-green-800 mb-6 pb-3 border-b border-gray-100">
-                   <i className="fa-solid fa-filter mr-2 text-green-600"></i>
-                   库位选择
-                 </h3>
-                 <div className="flex flex-col flex-grow space-y-6">
-                   {/* 仓库选择下拉框 */}
-                   <div className="w-full">
-                     <label className="block text-sm font-medium text-gray-700 mb-1">选择仓库</label>
-                     <select 
-                       value={selectedWarehouse}
-                       onChange={(e) => setSelectedWarehouse(e.target.value)}
-                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
-                     >
-                       <option value="all">全部仓库</option>
-                       <option value="WH001">WH001 (一号仓库)</option>
-                       <option value="WH002">WH002 (二号仓库)</option>
-                     </select>
-                   </div>
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* 左侧操作区域 */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5 }}
+            className="lg:w-1/4"
+          >
+            <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 h-full flex flex-col">
+              <h3 className="text-xl font-bold text-green-800 mb-6 pb-3 border-b border-gray-100">
+                <i className="fa-solid fa-filter mr-2 text-green-600"></i>
+                库位选择
+              </h3>
+              <div className="flex flex-col flex-grow space-y-6">
+                {/* 仓库选择下拉框 */}
+                <div className="w-full">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    选择仓库
+                  </label>
+                  <select
+                    value={selectedWarehouse}
+                    onChange={(e) => setSelectedWarehouse(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
+                  >
+                    <option value="all">全部仓库</option>
+                    <option value="WH001">WH001 (一号仓库)</option>
+                    <option value="WH002">WH002 (二号仓库)</option>
+                  </select>
+                </div>
 
-                   {/* 储区选择下拉框 */}
-                   <div className="w-full">
-                     <label className="block text-sm font-medium text-gray-700 mb-1">选择储区</label>
-                     <select 
-                       value={selectedArea}
-                       onChange={(e) => setSelectedArea(e.target.value)}
-                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
-                     >
-                       <option value="all">全部储区</option>
-                       <option value="A">A区</option>
-                       <option value="B">B区</option>
-                     </select>
-                   </div>
+                {/* 储区选择下拉框 */}
+                <div className="w-full">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    选择储区
+                  </label>
+                  <select
+                    value={selectedArea}
+                    onChange={(e) => setSelectedArea(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
+                  >
+                    <option value="all">全部储区</option>
+                    <option value="A">A区</option>
+                    <option value="B">B区</option>
+                  </select>
+                </div>
 
-                   {/* 获取库位信息按钮 */}
-                   <button
-                     onClick={fetchbinData}
-                     disabled={isLoading}
-                     className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center"
-                   >
-                     {isLoading ? (
-                       <>
-                         <i className="fas fa-spinner fa-spin mr-2"></i> 获取中...
-                       </>
-                     ) : (
-                       <>
-                         <i className="fa-solid fa-database mr-2"></i>{" "}
-                         获取库位信息
-                       </>
-                     )}
-                   </button>
+                {/* 获取库位信息按钮 */}
+                <button
+                  onClick={fetchbinData}
+                  disabled={isLoading}
+                  className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center"
+                >
+                  {isLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-2"></i> 获取中...
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-database mr-2"></i> 获取库位信息
+                    </>
+                  )}
+                </button>
 
-                   {/* 空出来一段距离 - 保持弹性布局 */}
-                   <div className="flex-grow"></div>
-                 </div>
-                 
-                  {/* 空出来一段距离 - 保持弹性布局 */}
-                 <div className="flex-grow"></div>
-               </div>
-             </motion.div>
+                {/* 空出来一段距离 - 保持弹性布局 */}
+                <div className="flex-grow"></div>
+              </div>
+
+              {/* 空出来一段距离 - 保持弹性布局 */}
+              <div className="flex-grow"></div>
+            </div>
+          </motion.div>
           {/* 右侧数据展示区域 */}
-           <motion.div
-             initial={{ opacity: 0, x: 20 }}
-             animate={{ opacity: 1, x: 0 }}
-             transition={{ duration: 0.5, delay: 0.2 }}
-             className="lg:w-3/4"
-           >
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="lg:w-3/4"
+          >
             <div className="bg-white rounded-xl shadow-md border border-gray-100 h-full flex flex-col">
               <div className="p-6 border-b border-gray-100">
                 <h3 className="text-xl font-bold text-green-800 flex items-center">
@@ -748,7 +868,7 @@ interface InventoryTask {
                         库位信息（已选中 {selectedBins.length} 项）
                       </h4>
                       <div className="flex items-center space-x-2">
-                       <input
+                        <input
                           type="text"
                           placeholder="自动生成，可手动修改"
                           value={taskNoInput}
@@ -763,7 +883,7 @@ interface InventoryTask {
                           }}
                           className="ml-2 px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
                         >
-                           自动生成
+                          自动生成
                         </button>
                       </div>
                     </div>
@@ -903,7 +1023,7 @@ interface InventoryTask {
                   </div>
                 )}
 
-                 {/* 添加盘点库位按钮 - 移动到这里 */}
+                {/* 添加盘点库位按钮 - 移动到这里 */}
                 <button
                   onClick={addSelectedBinsToTasks}
                   disabled={selectedBins.length === 0}
@@ -914,31 +1034,31 @@ interface InventoryTask {
                 </button>
 
                 {/* 盘点任务表 */}
-   <div className="overflow-x-auto">
-    <div className="flex items-center justify-between mb-4">
-      <h4 className="text-lg font-semibold text-green-800 mr-4">
-        盘点任务（共 {inventoryTasks.length} 项）
-      </h4>
-        <button
-          onClick={() => {
-            if (inventoryTasks.length > 0) {
-              setShowConfirmDialog(true);
-            } else {
-              setShowMessage(true);
-              setMessageType('info');
-              setMessageContent('当前没有盘点任务');
-            }
-          }}
-          disabled={inventoryTasks.length === 0}
-          className={`px-3 py-1 text-sm rounded transition-colors ${
-            inventoryTasks.length > 0
-              ? "bg-red-600 text-white hover:bg-red-700"
-              : "bg-gray-300 text-gray-500 cursor-not-allowed"
-          }`}
-        >
-          <i className="fa-solid fa-trash-can mr-1"></i> 全部删除
-        </button>
-    </div>
+                <div className="overflow-x-auto">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-lg font-semibold text-green-800 mr-4">
+                      盘点任务（共 {inventoryTasks.length} 项）
+                    </h4>
+                    <button
+                      onClick={() => {
+                        if (inventoryTasks.length > 0) {
+                          setShowConfirmDialog(true);
+                        } else {
+                          setShowMessage(true);
+                          setMessageType("info");
+                          setMessageContent("当前没有盘点任务");
+                        }
+                      }}
+                      disabled={inventoryTasks.length === 0}
+                      className={`px-3 py-1 text-sm rounded transition-colors ${
+                        inventoryTasks.length > 0
+                          ? "bg-red-600 text-white hover:bg-red-700"
+                          : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      }`}
+                    >
+                      <i className="fa-solid fa-trash-can mr-1"></i> 全部删除
+                    </button>
+                  </div>
                   {/* 添加高度限制和滚动 */}
                   <div className="overflow-x-auto overflow-y-auto max-h-[300px] border rounded-lg">
                     <table className="min-w-full divide-y divide-gray-200 table-fixed">
@@ -979,11 +1099,10 @@ interface InventoryTask {
                           >
                             数量（件）
                           </th>
-
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                         {inventoryTasks.length > 0 ? (
+                        {inventoryTasks.length > 0 ? (
                           inventoryTasks.map((task, index) => (
                             <tr
                               key={`${task.taskID}-${task.binCode}-${index}`}
@@ -1040,7 +1159,7 @@ interface InventoryTask {
                               >
                                 {task.tobaccoQty}
                               </td>
-                               </tr>
+                            </tr>
                           ))
                         ) : (
                           <tr>
@@ -1071,12 +1190,10 @@ interface InventoryTask {
                     </span>{" "}
                     条记录
                   </div>
-  <div className="flex space-x-3">
-  <button
+                  <div className="flex space-x-3">
+                    <button
                       className="px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg transition-colors flex items-center"
-                      onClick={() => {
-                        createTaskMainfest();
-                      }}
+                      onClick={handleCreateManifest}
                     >
                       <i className="fa-solid fa-check-circle mr-2"></i>
                       生成任务清单
@@ -1162,10 +1279,10 @@ interface InventoryTask {
                   setInventoryTasks([]);
                   setShowConfirmDialog(false);
                   // 显示成功消息
-                  setMessageType('success');
-                  setMessageContent('所有盘点任务已删除');
+                  setMessageType("success");
+                  setMessageContent("所有盘点任务已删除");
                   setShowMessage(true);
-                  
+
                   // 3秒后自动关闭消息
                   setTimeout(() => setShowMessage(false), 3000);
                 }}
@@ -1186,25 +1303,39 @@ interface InventoryTask {
           exit={{ opacity: 0, y: -20 }}
           className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50"
         >
-          <div className={`px-6 py-4 rounded-lg shadow-lg flex items-center ${
-            messageType === 'success' ? 'bg-green-50 border-l-4 border-green-500' :
-            messageType === 'error' ? 'bg-red-50 border-l-4 border-red-500' :
-            'bg-blue-50 border-l-4 border-blue-500'
-          }`}>
-            <i className={`fa-solid mr-3 text-xl ${
-              messageType === 'success' ? 'text-green-500' :
-              messageType === 'error' ? 'text-red-500' :
-              'text-blue-500'
-            }`}>
-              {messageType === 'success' ? 'check-circle' :
-               messageType === 'error' ? 'times-circle' :
-               'info-circle'}
+          <div
+            className={`px-6 py-4 rounded-lg shadow-lg flex items-center ${
+              messageType === "success"
+                ? "bg-green-50 border-l-4 border-green-500"
+                : messageType === "error"
+                  ? "bg-red-50 border-l-4 border-red-500"
+                  : "bg-blue-50 border-l-4 border-blue-500"
+            }`}
+          >
+            <i
+              className={`fa-solid mr-3 text-xl ${
+                messageType === "success"
+                  ? "text-green-500"
+                  : messageType === "error"
+                    ? "text-red-500"
+                    : "text-blue-500"
+              }`}
+            >
+              {messageType === "success"
+                ? "check-circle"
+                : messageType === "error"
+                  ? "times-circle"
+                  : "info-circle"}
             </i>
-            <p className={`font-medium ${
-              messageType === 'success' ? 'text-green-800' :
-              messageType === 'error' ? 'text-red-800' :
-              'text-blue-800'
-            }`}>
+            <p
+              className={`font-medium ${
+                messageType === "success"
+                  ? "text-green-800"
+                  : messageType === "error"
+                    ? "text-red-800"
+                    : "text-blue-800"
+              }`}
+            >
               {messageContent}
             </p>
           </div>

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { GATEWAY_URL } from "@/config/ip_address";
 import * as XLSX from "xlsx";
 import { useNavigate } from "react-router-dom";
+import { addOperationLog } from "@/lib/operationLog";
 
 // 历史任务类型定义
 interface HistoryTask {
@@ -39,6 +40,11 @@ export default function History() {
   const [currentImages, setCurrentImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // 新增状态：清理历史数据
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupDays, setCleanupDays] = useState(180); // 默认清理6个月前的数据
 
   // 处理返回按钮点击
   const handleBack = () => {
@@ -299,6 +305,85 @@ export default function History() {
     }
   };
 
+  // 清理历史数据
+  const handleCleanupHistory = async () => {
+    if (!authToken) {
+      toast.error("未找到认证令牌，请重新登录");
+      return;
+    }
+
+    setCleanupLoading(true);
+    try {
+      // 计算截止日期
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - cleanupDays);
+      const cutoffDateStr = cutoffDate.toISOString().split("T")[0];
+
+      // 调用后端API清理历史数据
+      const response = await fetch(`${GATEWAY_URL}/api/history/cleanup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          cutoff_date: cutoffDateStr,
+          days: cleanupDays,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.code === 200) {
+        const cleanedCount = result.data.cleaned_count || 0;
+        toast.success(`成功清理 ${cleanedCount} 条历史数据`);
+
+        // 记录操作日志
+        addOperationLog({
+          operation_type: "system_cleanup",
+          user_id: authToken || undefined,
+          user_name: userName,
+          action: "历史数据清理",
+          target: `${cleanupDays}天前的数据`,
+          status: "success",
+          details: {
+            cleaned_count: cleanedCount,
+            cutoff_date: cutoffDateStr,
+            cleanup_days: cleanupDays,
+          },
+        });
+
+        // 重新加载历史任务列表
+        await loadHistoryTasks();
+      } else {
+        throw new Error(result.message || "清理历史数据失败");
+      }
+    } catch (error) {
+      console.error("清理历史数据失败:", error);
+      toast.error(
+        "清理历史数据失败: " +
+          (error instanceof Error ? error.message : "未知错误"),
+      );
+
+      // 记录失败的操作日志
+      addOperationLog({
+        operation_type: "system_cleanup",
+        user_id: authToken || undefined,
+        user_name: userName,
+        action: "历史数据清理",
+        target: `${cleanupDays}天前的数据`,
+        status: "failed",
+        details: {
+          cleanup_days: cleanupDays,
+          error: error instanceof Error ? error.message : "未知错误",
+        },
+      });
+    } finally {
+      setCleanupLoading(false);
+      setShowCleanupDialog(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* 背景图片 */}
@@ -377,9 +462,18 @@ export default function History() {
                 <h4 className="text-lg font-semibold text-gray-800">
                   盘点任务列表
                 </h4>
-                <div className="flex items-center text-sm text-gray-500">
-                  <i className="fa-solid fa-filter mr-2"></i>
-                  <span>近6个月内</span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowCleanupDialog(true)}
+                    className="text-sm px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center"
+                  >
+                    <i className="fa-solid fa-trash-alt mr-1"></i>
+                    清理历史
+                  </button>
+                  <div className="flex items-center text-sm text-gray-500">
+                    <i className="fa-solid fa-filter mr-2"></i>
+                    <span>近6个月内</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -690,17 +784,17 @@ export default function History() {
                 <p className="text-gray-600 mb-6">
                   请在左侧选择一个历史盘点任务以查看详情
                 </p>
-                <div className="text-sm text-gray-500">
+                {/* <div className="text-sm text-gray-500">
                   <i className="fa-solid fa-lightbulb mr-1"></i>
                   提示：超过6个月的盘点任务已自动隐藏
-                </div>
+                </div> */}
               </div>
             )}
           </div>
         </div>
 
         {/* 底部信息 */}
-        <div className="mt-6 text-sm text-gray-500">
+        {/* <div className="mt-6 text-sm text-gray-500">
           <div className="flex flex-col md:flex-row items-start md:items-center space-y-2 md:space-y-0 md:space-x-6">
             <div className="flex items-center">
               <i className="fa-solid fa-circle-info mr-2 text-green-600"></i>
@@ -713,7 +807,7 @@ export default function History() {
               <span>时间格式：任务编号中的日期为YYYYMMDD格式</span>
             </div>
           </div>
-        </div>
+        </div> */}
       </main>
 
       {/* 页脚 */}
@@ -748,6 +842,88 @@ export default function History() {
           </div>
         </div>
       </footer>
+
+      {/* 清理历史数据确认对话框 */}
+      {showCleanupDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            {/* 对话框头部 */}
+            <div className="px-6 py-4 bg-red-50 border-b border-red-100">
+              <div className="flex items-center">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mr-3">
+                  <i className="fa-solid fa-exclamation-triangle text-red-600"></i>
+                </div>
+                <h3 className="text-lg font-bold text-gray-800">
+                  清理历史数据
+                </h3>
+              </div>
+            </div>
+
+            {/* 对话框内容 */}
+            <div className="px-6 py-4">
+              <p className="text-gray-600 mb-4">
+                您即将清理
+                <span className="font-bold text-red-600">
+                  {" "}
+                  {cleanupDays} 天前
+                </span>
+                的所有历史盘点数据。
+              </p>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                <p className="text-sm text-yellow-800">
+                  <i className="fa-solid fa-info-circle mr-2"></i>
+                  此操作不可逆，清理后的数据将无法恢复！
+                </p>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  选择清理天数范围：
+                </label>
+                <select
+                  value={cleanupDays}
+                  onChange={(e) => setCleanupDays(parseInt(e.target.value))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                >
+                  <option value={90}>90天（3个月）</option>
+                  <option value={180}>180天（6个月）</option>
+                  <option value={365}>365天（1年）</option>
+                </select>
+              </div>
+            </div>
+
+            {/* 对话框按钮 */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3">
+              <button
+                onClick={() => setShowCleanupDialog(false)}
+                disabled={cleanupLoading}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCleanupHistory}
+                disabled={cleanupLoading}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              >
+                {cleanupLoading ? (
+                  <>
+                    <i className="fa-solid fa-spinner fa-spin mr-2"></i>
+                    清理中...
+                  </>
+                ) : (
+                  <>
+                    <i className="fa-solid fa-trash-alt mr-2"></i>
+                    确认清理
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

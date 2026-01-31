@@ -1,74 +1,40 @@
 INFO:     Will watch for changes in these directories: ['/home/ubuntu/Projects/LeafDepot/services/sim/lms']
 INFO:     Uvicorn running on http://0.0.0.0:6000 (Press CTRL+C to quit)
-INFO:     Started reloader process [5782] using StatReload
-INFO:     Started server process [5785]
+INFO:     Started reloader process [9020] using StatReload
+INFO:     Started server process [9023]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 成功从Excel加载 18 条储位信息
 成功从Excel加载 3 条用户信息
-INFO:     127.0.0.1:38626 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38642 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38654 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38658 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48774 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48778 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59070 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59080 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48982 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48998 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49006 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49012 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38072 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38082 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51212 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51222 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51228 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51242 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51252 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51262 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51268 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51270 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:46744 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:46754 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35106 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35114 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35118 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35128 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34884 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34894 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57466 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57476 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57478 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57488 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41218 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41232 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41240 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41244 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42336 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42350 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54542 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54550 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54560 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54570 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54582 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54586 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54588 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54598 - "GET /login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54602 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57202 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57212 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49554 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50212 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50220 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50230 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50240 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36088 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36100 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60818 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60822 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54358 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54368 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:44756 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:44758 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60810 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60826 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58590 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58600 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58606 - "GET /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58612 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34920 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34936 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59868 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59874 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59426 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59440 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45950 - "GET /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45958 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45972 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45988 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60722 - "GET /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60730 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60734 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60738 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51112 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51126 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34914 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34930 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47568 - "GET /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47578 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32970 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32984 - "GET /auth/token?token=d7e8d8fe17fbfcdb6e41efbfbd6d6befbfbd7aefbfbd53634fefbfbd1a7e050c16e3b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57948 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57954 - "GET /third/api/v1/userManagement/getUsers HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42680 - "GET /login HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:33876 - "GET /login HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:33890 - "GET /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33904 - "GET /auth/token?token=1abf2141c5564da9900328f125a73eb5 HTTP/1.1" 200 OK

@@ -4,13 +4,15 @@
 # 用法:
 #   ./manage.sh start gateway   # 启动gateway服务
 #   ./manage.sh start lms       # 启动lms服务
+#   ./manage.sh start rcs       # 启动rcs服务
 #   ./manage.sh start web       # 启动web服务
 #   ./manage.sh start all       # 启动所有服务
 #   ./manage.sh end gateway     # 停止gateway服务
 #   ./manage.sh end lms         # 停止lms服务
-#   ./manage.sh end web          # 停止web服务
-#   ./manage.sh end all          # 停止所有服务
-#   ./manage.sh status           # 查看所有服务状态
+#   ./manage.sh end rcs         # 停止rcs服务
+#   ./manage.sh end web         # 停止web服务
+#   ./manage.sh end all         # 停止所有服务
+#   ./manage.sh status          # 查看所有服务状态
 ###
 
 # 获取脚本所在目录（项目根目录）
@@ -38,6 +40,31 @@ log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
+# 服务配置
+declare -A SERVICES=(
+    ["gateway"]="gateway:app --host 0.0.0.0 --port 8000 --reload"
+    ["lms"]="sim_lms_server:app --host 0.0.0.0 --port 6000 --reload"
+    ["rcs"]="sim_rcs_server:app --host 0.0.0.0 --port 4001 --reload"
+)
+
+declare -A SERVICE_DIRS=(
+    ["gateway"]="services/api"
+    ["lms"]="services/sim/lms"
+    ["rcs"]="services/sim/rcs"
+)
+
+declare -A SERVICE_SCRIPTS=(
+    ["gateway"]="start_gateway.sh"
+    ["lms"]="start_lms_sim.sh"
+    ["rcs"]="start_rcs_sim.sh"
+)
+
+declare -A SERVICE_URLS=(
+    ["gateway"]="http://localhost:8000/docs"
+    ["lms"]="http://localhost:6000"
+    ["rcs"]="http://localhost:4001"
+)
+
 # 获取PID文件路径
 get_pid_file() {
     local service=$1
@@ -53,84 +80,100 @@ is_running() {
     kill -0 "$pid" 2>/dev/null
 }
 
-# 启动gateway服务
-start_gateway() {
-    local pid_file=$(get_pid_file "gateway")
+# 启动指定服务
+start_service() {
+    local service=$1
+    local pid_file=$(get_pid_file "$service")
     
     # 检查是否已经运行
     if [ -f "$pid_file" ]; then
         local pid=$(cat "$pid_file")
         if is_running "$pid"; then
-            log_warn "Gateway服务已经在运行 (PID: $pid)"
+            log_warn "$service 服务已经在运行 (PID: $pid)"
             return 1
         else
             rm -f "$pid_file"
         fi
     fi
     
-    log_info "启动Gateway服务..."
+    log_info "启动 $service 服务..."
     
     # 设置PYTHONPATH
     export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
     
-    # 切换到服务目录并在后台启动
-    cd "$PROJECT_ROOT/services/api"
-    nohup uvicorn gateway:app --host 0.0.0.0 --port 8000 --reload > "$PROJECT_ROOT/logs/gateway.log" 2>&1 &
-    local pid=$!
+    # 检查是否有专门的启动脚本
+    local service_script="${SERVICE_SCRIPTS[$service]}"
+    if [ -f "$PROJECT_ROOT/$service_script" ] || [ -f "$PROJECT_ROOT/services/sim/lms/$service_script" ] || [ -f "$PROJECT_ROOT/services/sim/rcs/$service_script" ]; then
+        # 使用专门的启动脚本
+        local script_path="$PROJECT_ROOT/$service_script"
+        if [ ! -f "$script_path" ]; then
+            # 尝试在其他位置查找
+            script_path="$PROJECT_ROOT/services/sim/lms/$service_script"
+        fi
+        if [ ! -f "$script_path" ]; then
+            script_path="$PROJECT_ROOT/services/sim/rcs/$service_script"
+        fi
+        
+        log_info "使用启动脚本: $(basename "$script_path")"
+        
+        # 切换到脚本所在目录
+        local script_dir=$(dirname "$script_path")
+        cd "$script_dir"
+        
+        # 执行启动脚本
+        nohup bash "$(basename "$script_path")" > "$PROJECT_ROOT/logs/${service}.log" 2>&1 &
+        local pid=$!
+    else
+        # 使用内置启动方式
+        local service_dir="${SERVICE_DIRS[$service]}"
+        local service_config="${SERVICES[$service]}"
+        
+        if [ -z "$service_dir" ] || [ -z "$service_config" ]; then
+            log_error "未知的服务: $service"
+            return 1
+        fi
+        
+        # 切换到服务目录
+        cd "$PROJECT_ROOT/$service_dir"
+        
+        # 启动服务
+        nohup uvicorn $service_config > "$PROJECT_ROOT/logs/${service}.log" 2>&1 &
+        local pid=$!
+    fi
     
     # 保存PID
     echo $pid > "$pid_file"
     
     sleep 2
     if is_running "$pid"; then
-        log_info "Gateway服务启动成功 (PID: $pid)"
-        log_info "日志文件: $PROJECT_ROOT/logs/gateway.log"
-        log_info "API文档: http://localhost:8000/docs"
+        log_info "$service 服务启动成功 (PID: $pid)"
+        log_info "日志文件: $PROJECT_ROOT/logs/${service}.log"
+        
+        local service_url="${SERVICE_URLS[$service]}"
+        if [ -n "$service_url" ]; then
+            log_info "服务地址: $service_url"
+        fi
     else
-        log_error "Gateway服务启动失败"
+        log_error "$service 服务启动失败"
+        log_error "请查看日志文件: $PROJECT_ROOT/logs/${service}.log"
         rm -f "$pid_file"
         return 1
     fi
 }
 
+# 启动gateway服务
+start_gateway() {
+    start_service "gateway"
+}
+
 # 启动lms服务
 start_lms() {
-    local pid_file=$(get_pid_file "lms")
-    
-    # 检查是否已经运行
-    if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file")
-        if is_running "$pid"; then
-            log_warn "LMS服务已经在运行 (PID: $pid)"
-            return 1
-        else
-            rm -f "$pid_file"
-        fi
-    fi
-    
-    log_info "启动LMS服务..."
-    
-    # 设置PYTHONPATH
-    export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
-    
-    # 切换到服务目录并在后台启动
-    cd "$PROJECT_ROOT/services/sim/lms"
-    nohup uvicorn sim_lms_server:app --host 0.0.0.0 --port 6000 --reload > "$PROJECT_ROOT/logs/lms.log" 2>&1 &
-    local pid=$!
-    
-    # 保存PID
-    echo $pid > "$pid_file"
-    
-    sleep 2
-    if is_running "$pid"; then
-        log_info "LMS服务启动成功 (PID: $pid)"
-        log_info "日志文件: $PROJECT_ROOT/logs/lms.log"
-        log_info "服务地址: http://localhost:6000"
-    else
-        log_error "LMS服务启动失败"
-        rm -f "$pid_file"
-        return 1
-    fi
+    start_service "lms"
+}
+
+# 启动rcs服务
+start_rcs() {
+    start_service "rcs"
 }
 
 # 启动web服务
@@ -222,7 +265,7 @@ show_status() {
     echo "=== 服务状态 ==="
     echo ""
     
-    local services=("gateway" "lms" "web")
+    local services=("gateway" "lms" "rcs" "web")
     local all_stopped=true
     
     for service in "${services[@]}"; do
@@ -263,6 +306,8 @@ main() {
                 sleep 1
                 start_lms
                 sleep 1
+                start_rcs
+                sleep 1
                 start_web
                 echo ""
                 show_status
@@ -274,12 +319,15 @@ main() {
                     lms)
                         start_lms
                         ;;
+                    rcs)
+                        start_rcs
+                        ;;
                     web)
                         start_web
                         ;;
                     *)
                         log_error "未知的服务: $service"
-                        echo "用法: $0 start [gateway|lms|web|all]"
+                        echo "用法: $0 start [gateway|lms|rcs|web|all]"
                         exit 1
                         ;;
                 esac
@@ -290,15 +338,16 @@ main() {
                 log_info "停止所有服务..."
                 stop_service "gateway"
                 stop_service "lms"
+                stop_service "rcs"
                 stop_service "web"
             else
                 case "$service" in
-                    gateway|lms|web)
+                    gateway|lms|rcs|web)
                         stop_service "$service"
                         ;;
                     *)
                         log_error "未知的服务: $service"
-                        echo "用法: $0 end [gateway|lms|web|all]"
+                        echo "用法: $0 end [gateway|lms|rcs|web|all]"
                         exit 1
                         ;;
                 esac
@@ -308,7 +357,7 @@ main() {
             show_status
             ;;
         *)
-            echo "用法: $0 {start|end|status} [gateway|lms|web|all]"
+            echo "用法: $0 {start|end|status} [gateway|lms|rcs|web|all]"
             echo ""
             echo "命令:"
             echo "  start <service>  启动指定服务（或使用 'all' 启动所有服务）"
@@ -318,12 +367,14 @@ main() {
             echo "服务:"
             echo "  gateway          Gateway API服务 (端口 8000)"
             echo "  lms              LMS模拟服务 (端口 6000)"
+            echo "  rcs              RCS模拟服务 (端口 4001)"
             echo "  web              Web前端服务 (端口 3000)"
             echo "  all              所有服务"
             echo ""
             echo "示例:"
             echo "  $0 start gateway      # 启动gateway服务"
             echo "  $0 start lms          # 启动lms服务"
+            echo "  $0 start rcs          # 启动rcs服务"
             echo "  $0 start web          # 启动web服务"
             echo "  $0 start all          # 启动所有服务"
             echo "  $0 end gateway        # 停止gateway服务"
@@ -336,4 +387,3 @@ main() {
 
 # 执行主函数
 main "$@"
-

@@ -1,15 +1,28 @@
-import { useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/authContext";
 import { motion } from "framer-motion";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
+import {
+  getRecentOperationLogs,
+  getOperationLogs,
+  clearAllOperationLogs,
+  OperationLog,
+} from "@/lib/operationLog";
 
-export default function Dashboard() {
+const Dashboard = () => {
   const [supportedWarehouseCount, setSupportedWarehouseCount] = useState(0);
   const [supportedCategoryCount, setSupportedCategoryCount] = useState(0);
+  const [monthlyInventoryCount, setMonthlyInventoryCount] = useState(0);
+  const [monthlyInventoryChange, setMonthlyInventoryChange] = useState(0);
+  const [accuracy, setAccuracy] = useState(100);
+  const [accuracyChange, setAccuracyChange] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const { authToken, logout } = useAuth(); // 从 useAuth 获取 logout
+  const [operationLogs, setOperationLogs] = useState<OperationLog[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(true);
+  const [showAllLogs, setShowAllLogs] = useState(false); // 控制是否显示全部操作记录
+  const { authToken, logout, userLevel } = useAuth();
 
   // 设置当前日期
   useEffect(() => {
@@ -28,7 +41,6 @@ export default function Dashboard() {
 
   // 读取Excel文件并统计支持仓库数和支持品类数
   useEffect(() => {
-    // 模拟从Excel文件中读取数据
     const readExcelData = async () => {
       setIsLoading(true);
       try {
@@ -38,11 +50,11 @@ export default function Dashboard() {
           ["101", "一号仓库", "主仓库"],
           ["102", "二号仓库", "副仓库"],
           ["103", "三号仓库", "临时仓库"],
-          ["101", "一号仓库", "重复记录"], // 重复的仓库编号
+          ["101", "一号仓库", "重复记录"],
           ["104", "四号仓库", "新仓库"],
           ["105", "五号仓库", "备用仓库"],
           ["106", "六号仓库", "中转仓库"],
-          ["103", "三号仓库", "重复记录"], // 重复的仓库编号
+          ["103", "三号仓库", "重复记录"],
         ];
 
         // 模拟品类数据Excel文件
@@ -80,36 +92,162 @@ export default function Dashboard() {
           ["C030", "哈德门", "精品"],
         ];
 
-        // 统计支持仓库数（第A列不同数字的数量）
+        // 统计支持仓库数
         const warehouseColumnAValues = warehouseMockData
           .slice(1)
           .map((row) => row[0]);
         const uniqueWarehouseValues = new Set(warehouseColumnAValues);
         const uniqueWarehouseCount = uniqueWarehouseValues.size;
 
-        // 统计支持品类数（除首行外的行数）
-        const categoryCount = categoryMockData.length - 1; // 减去首行
+        // 统计支持品类数
+        const categoryCount = categoryMockData.length - 1;
 
         setSupportedWarehouseCount(uniqueWarehouseCount);
         setSupportedCategoryCount(categoryCount);
 
         toast.success(
-          `成功读取Excel文件，识别到 ${uniqueWarehouseCount} 个不同的仓库编号和 ${categoryCount} 种品类`
+          `成功读取Excel文件，识别到 ${uniqueWarehouseCount} 个不同的仓库编号和 ${categoryCount} 种品类`,
         );
       } catch (error) {
         console.error("读取Excel文件出错:", error);
         toast.error("读取Excel文件失败，使用默认数据");
-        setSupportedWarehouseCount(8); // 设置默认值
-        setSupportedCategoryCount(30); // 设置默认值
+        setSupportedWarehouseCount(8);
+        setSupportedCategoryCount(30);
       } finally {
         setIsLoading(false);
       }
     };
 
-    // 在实际应用中，这里应该是用户选择文件后触发
-    // 为了演示，我们在组件加载时自动模拟读取
     readExcelData();
   }, []);
+
+  // 计算本月盘点数据和准确率
+  const calculateDashboardStats = (logs: OperationLog[]) => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+
+    // 本月完成的盘点任务
+    const monthlyTasks = logs.filter((log) => {
+      const logDate = new Date(log.timestamp);
+      return (
+        log.operation_type === "inventory" &&
+        log.action?.includes("完成") &&
+        logDate.getMonth() === currentMonth &&
+        logDate.getFullYear() === currentYear
+      );
+    });
+
+    // 上月完成的盘点任务
+    const lastMonthTasks = logs.filter((log) => {
+      const logDate = new Date(log.timestamp);
+      return (
+        log.operation_type === "inventory" &&
+        log.action?.includes("完成") &&
+        logDate.getMonth() === lastMonth &&
+        logDate.getFullYear() === lastMonthYear
+      );
+    });
+
+    // 计算本月盘点次数
+    const currentMonthCount = monthlyTasks.length;
+    const lastMonthCount = lastMonthTasks.length;
+    const change = currentMonthCount - lastMonthCount;
+
+    // 计算准确率
+    let totalAccuracy = 100;
+    let totalTasksForAccuracy = 0;
+
+    monthlyTasks.forEach((task) => {
+      if (
+        task.details?.accuracy !== undefined &&
+        task.details.accuracy !== null
+      ) {
+        totalAccuracy += task.details.accuracy;
+        totalTasksForAccuracy++;
+      }
+    });
+
+    const avgAccuracy =
+      totalTasksForAccuracy > 0 ? totalAccuracy / totalTasksForAccuracy : 100;
+
+    // 计算上月准确率
+    let lastMonthTotalAccuracy = 100;
+    let lastMonthTotalTasksForAccuracy = 0;
+
+    lastMonthTasks.forEach((task) => {
+      if (
+        task.details?.accuracy !== undefined &&
+        task.details.accuracy !== null
+      ) {
+        lastMonthTotalAccuracy += task.details.accuracy;
+        lastMonthTotalTasksForAccuracy++;
+      }
+    });
+
+    const lastMonthAvgAccuracy =
+      lastMonthTotalTasksForAccuracy > 0
+        ? lastMonthTotalAccuracy / lastMonthTotalTasksForAccuracy
+        : 100;
+    const accuracyChange = avgAccuracy - lastMonthAvgAccuracy;
+
+    setMonthlyInventoryCount(currentMonthCount);
+    setMonthlyInventoryChange(change);
+    setAccuracy(avgAccuracy);
+    setAccuracyChange(accuracyChange);
+  };
+
+  // 获取操作记录
+  useEffect(() => {
+    const fetchOperationLogs = () => {
+      try {
+        setLoadingLogs(true);
+        // 根据 showAllLogs 状态决定获取全部记录还是最近5条
+        const logs = showAllLogs
+          ? getOperationLogs()
+          : getRecentOperationLogs(5);
+        setOperationLogs(logs);
+        console.log("获取到的操作记录:", logs);
+
+        // 计算Dashboard统计信息
+        const allLogs = getOperationLogs(); // 获取全部记录用于统计
+        calculateDashboardStats(allLogs);
+      } catch (error) {
+        console.error("获取操作记录失败:", error);
+        setOperationLogs([]);
+      } finally {
+        setLoadingLogs(false);
+      }
+    };
+
+    fetchOperationLogs();
+  }, [showAllLogs]); // 添加 showAllLogs 依赖，当它变化时重新加载
+
+  // 清空操作记录
+  const handleClearLogs = () => {
+    if (userLevel !== "admin") {
+      toast.error("只有管理员才能清空操作记录");
+      return;
+    }
+
+    // 显示确认对话框
+    const confirmed = window.confirm(
+      "确定要清空所有操作记录吗？此操作不可恢复！",
+    );
+
+    if (confirmed) {
+      try {
+        clearAllOperationLogs();
+        setOperationLogs([]);
+        toast.success("操作记录已清空");
+      } catch (error) {
+        console.error("清空操作记录失败:", error);
+        toast.error("清空操作记录失败");
+      }
+    }
+  };
 
   // 功能选项数据
   const features = [
@@ -135,6 +273,263 @@ export default function Dashboard() {
       path: "/user_manage",
     },
   ];
+
+  // 渲染操作类型图标
+  const getOperationIcon = (log: OperationLog) => {
+    const action = log.action || "";
+
+    switch (log.operation_type) {
+      case "inventory":
+        if (action.includes("获取库位信息")) {
+          return "fa-database text-green-600";
+        } else if (action.includes("生成任务清单")) {
+          return "fa-list-check text-blue-600";
+        } else if (action.includes("下发盘点任务") || action.includes("启动")) {
+          return "fa-play-circle text-indigo-600";
+        } else if (action.includes("完成")) {
+          return "fa-check-circle text-green-600";
+        } else if (action.includes("失败")) {
+          return "fa-times-circle text-red-600";
+        }
+        return "fa-tasks text-green-600";
+      case "user_login":
+        return "fa-sign-in-alt text-blue-600";
+      case "user_management":
+        return "fa-users-gear text-purple-600";
+      case "system_cleanup":
+        return "fa-trash-alt text-amber-600";
+      default:
+        return "fa-cog text-gray-600";
+    }
+  };
+
+  // 渲染操作类型文本
+  const getOperationText = (log: OperationLog) => {
+    const action = log.action || "";
+
+    switch (log.operation_type) {
+      case "inventory":
+        if (action.includes("获取库位信息")) {
+          return "获取库位信息";
+        } else if (action.includes("生成任务清单")) {
+          return "生成任务清单";
+        } else if (action.includes("下发盘点任务")) {
+          return "下发盘点任务";
+        } else if (action.includes("完成")) {
+          return "盘点任务完成";
+        } else if (action.includes("启动")) {
+          return "下发盘点任务";
+        } else if (action.includes("失败")) {
+          return "盘点任务失败";
+        }
+        return "盘点操作";
+      case "user_login":
+        return "用户登录";
+      case "user_management":
+        if (action.includes("添加")) {
+          return "增加新用户";
+        } else if (action.includes("删除")) {
+          return "删除用户";
+        } else if (action.includes("变更")) {
+          return "用户权限变更";
+        }
+        return "用户管理";
+      case "system_cleanup":
+        return "历史数据清理";
+      default:
+        return action || "未知操作";
+    }
+  };
+
+  // 渲染操作描述
+  const getOperationDescription = (log: OperationLog) => {
+    const details = log.details || {};
+
+    switch (log.operation_type) {
+      case "inventory":
+        if (log.action?.includes("获取库位信息")) {
+          const warehouse = details.warehouse || "未知仓库";
+          const area = details.area || "未知储区";
+          const binCount = details.bin_count || 0;
+          return `${warehouse}/${area}，共 ${binCount} 条记录`;
+        } else if (log.action?.includes("生成任务清单")) {
+          const taskNo = details.task_no || log.target || "未知";
+          const taskCount = details.task_count || 0;
+          const totalQty = details.total_quantity || 0;
+          return `任务编号: ${taskNo}，${taskCount} 个储位，${totalQty} 件`;
+        } else if (
+          log.action?.includes("下发盘点任务") ||
+          log.action?.includes("启动")
+        ) {
+          const taskNo = details.task_no || log.target || "未知";
+          const taskCount = details.task_count || 0;
+          return `任务编号: ${taskNo}，包含 ${taskCount} 个储位`;
+        } else if (log.action?.includes("完成")) {
+          const taskNo = details.task_no || log.target || "未知";
+          const completedCount = details.completed_count || 0;
+          const abnormalCount = details.abnormal_count || 0;
+          const totalTime = details.total_time || 0; // 总耗时（分钟）
+          const accuracy = details.accuracy || 100; // 准确率（百分比）
+
+          let description = `任务编号: ${taskNo}，完成 ${completedCount} 个储位，${abnormalCount} 个异常`;
+
+          // 添加总耗时和准确率
+          if (totalTime > 0 || accuracy !== 100) {
+            description += `<br/><span class="text-xs text-gray-400">`;
+            if (totalTime > 0) {
+              description += `总耗时: ${totalTime}分钟`;
+              if (accuracy !== 100) {
+                description += ` | `;
+              }
+            }
+            if (accuracy !== 100) {
+              description += `准确率: ${accuracy.toFixed(1)}%`;
+            }
+            description += `</span>`;
+          }
+
+          return description;
+        }
+        return `任务编号: ${log.target || details.task_no || "未知"}`;
+
+      case "user_login":
+        return `用户: ${log.user_name || log.user_id || "未知用户"}`;
+
+      case "user_management":
+        if (log.action?.includes("添加")) {
+          const newUser = details.new_user_data || {};
+          return `用户名: ${newUser.userName || log.target || "未知用户"}，角色: ${newUser.userLevel || "未知"}`;
+        } else if (log.action?.includes("删除")) {
+          return `用户名: ${log.target || "未知用户"}`;
+        } else if (log.action?.includes("变更")) {
+          const oldRole = details.old_role || "未知";
+          const newRole = details.new_role || "未知";
+          return `用户名: ${log.target || "未知用户"}，${oldRole} → ${newRole}`;
+        }
+        return `目标: ${log.target || "未知"}`;
+
+      case "system_cleanup":
+        const cleanedCount = details.cleaned_count || 0;
+        const cutoffDate = details.cutoff_date || "未知日期";
+        return `清理了 ${cleanedCount} 条记录，清理 ${cutoffDate} 前的数据`;
+
+      default:
+        return `详情: ${JSON.stringify(details)}`;
+    }
+  };
+
+  // 渲染状态标签
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "success":
+      case "completed":
+        return {
+          class: "bg-green-100 text-green-800",
+          text: "成功",
+        };
+      case "running":
+        return {
+          class: "bg-blue-100 text-blue-800",
+          text: "进行中",
+        };
+      case "failed":
+        return {
+          class: "bg-red-100 text-red-800",
+          text: "失败",
+        };
+      default:
+        return {
+          class: "bg-gray-100 text-gray-800",
+          text: status,
+        };
+    }
+  };
+
+  // 格式化时间
+  const formatDateTime = (timestamp: string) => {
+    try {
+      const date = new Date(timestamp);
+      return date
+        .toLocaleString("zh-CN", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+        .replace(/\//g, "-");
+    } catch (e) {
+      return timestamp;
+    }
+  };
+
+  // 渲染操作记录表格
+  const renderOperationLogsTable = () => {
+    if (loadingLogs) {
+      return (
+        <tr>
+          <td colSpan={4} className="px-6 py-8 text-center">
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+            </div>
+            <p className="mt-2 text-gray-500">正在加载操作记录...</p>
+          </td>
+        </tr>
+      );
+    }
+
+    if (operationLogs.length === 0) {
+      return (
+        <tr>
+          <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+            <i className="fa-solid fa-clipboard-list text-3xl mb-2 opacity-50"></i>
+            <p>暂无操作记录</p>
+          </td>
+        </tr>
+      );
+    }
+
+    return operationLogs.map((log, index) => {
+      const statusBadge = getStatusBadge(log.status);
+
+      return (
+        <tr
+          key={log.id || index}
+          className="hover:bg-gray-50 transition-colors"
+        >
+          <td className="px-6 py-4 whitespace-nowrap">
+            <div className="flex items-center">
+              <i className={`fa-solid ${getOperationIcon(log)} mr-3`}></i>
+              <div>
+                <div className="text-sm font-medium text-gray-900">
+                  {getOperationText(log)}
+                </div>
+                <div
+                  className="text-xs text-gray-500"
+                  dangerouslySetInnerHTML={{
+                    __html: getOperationDescription(log),
+                  }}
+                ></div>
+              </div>
+            </div>
+          </td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+            {log.user_name || log.user_id || "未知操作员"}
+          </td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {formatDateTime(log.timestamp)}
+          </td>
+          <td className="px-6 py-4 whitespace-nowrap">
+            <span
+              className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusBadge.class}`}
+            >
+              {statusBadge.text}
+            </span>
+          </td>
+        </tr>
+      );
+    });
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -239,15 +634,26 @@ export default function Dashboard() {
             <div className="flex justify-between items-start mb-4">
               <div>
                 <p className="text-gray-500 text-sm">本月盘点</p>
-                <h3 className="text-3xl font-bold text-green-800 mt-1">24</h3>
+                <h3 className="text-3xl font-bold text-green-800 mt-1">
+                  {monthlyInventoryCount}
+                </h3>
               </div>
               <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
                 <i className="fa-solid fa-clipboard-check text-xl"></i>
               </div>
             </div>
             <div className="flex items-center text-sm">
-              <span className="text-green-600 flex items-center">
-                <i className="fa-solid fa-arrow-up mr-1"></i> 8 次
+              <span
+                className={
+                  monthlyInventoryChange >= 0
+                    ? "text-green-600 flex items-center"
+                    : "text-red-600 flex items-center"
+                }
+              >
+                <i
+                  className={`fa-solid ${monthlyInventoryChange >= 0 ? "fa-arrow-up" : "fa-arrow-down"} mr-1`}
+                ></i>{" "}
+                {Math.abs(monthlyInventoryChange)} 次
               </span>
               <span className="text-gray-500 ml-2">较上月</span>
             </div>
@@ -258,7 +664,7 @@ export default function Dashboard() {
               <div>
                 <p className="text-gray-500 text-sm">准确率</p>
                 <h3 className="text-3xl font-bold text-green-800 mt-1">
-                  99.7%
+                  {accuracy.toFixed(1)}%
                 </h3>
               </div>
               <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
@@ -266,8 +672,17 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex items-center text-sm">
-              <span className="text-green-600 flex items-center">
-                <i className="fa-solid fa-arrow-up mr-1"></i> 0.3%
+              <span
+                className={
+                  accuracyChange >= 0
+                    ? "text-green-600 flex items-center"
+                    : "text-red-600 flex items-center"
+                }
+              >
+                <i
+                  className={`fa-solid ${accuracyChange >= 0 ? "fa-arrow-up" : "fa-arrow-down"} mr-1`}
+                ></i>{" "}
+                {Math.abs(accuracyChange).toFixed(1)}%
               </span>
               <span className="text-gray-500 ml-2">较上月</span>
             </div>
@@ -314,16 +729,45 @@ export default function Dashboard() {
             </motion.div>
           ))}
         </div>
+
         {/* 最近操作记录 */}
         <div className="mt-12 bg-white rounded-xl shadow-md p-6 border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-bold text-gray-800">最近操作记录</h3>
-            <a
-              href="#"
-              className="text-green-600 hover:text-green-800 text-sm font-medium"
-            >
-              查看全部
-            </a>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  setShowAllLogs(!showAllLogs);
+                  toast.info(
+                    showAllLogs
+                      ? "已切换为显示最近5条记录"
+                      : "已切换为显示全部记录",
+                  );
+                }}
+                className="text-green-600 hover:text-green-800 text-sm font-medium flex items-center"
+              >
+                <i
+                  className={`fa-solid ${showAllLogs ? "fa-arrow-up mr-1" : "fa-list mr-1"}`}
+                ></i>
+                {showAllLogs ? "收起" : "查看全部"}
+              </button>
+              <button
+                onClick={() => {
+                  window.location.reload();
+                }}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center"
+              >
+                <i className="fa-solid fa-sync-alt mr-1"></i> 刷新
+              </button>
+              {userLevel === "admin" && (
+                <button
+                  onClick={handleClearLogs}
+                  className="text-red-600 hover:text-red-800 text-sm font-medium flex items-center"
+                >
+                  <i className="fa-solid fa-trash-alt mr-1"></i> 清空记录
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -334,7 +778,7 @@ export default function Dashboard() {
                     操作
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    仓库
+                    操作员
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     时间
@@ -345,144 +789,17 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {/* 最近下发的盘点任务 */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <i className="fa-solid fa-tasks text-green-600 mr-3"></i>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          下发盘点任务
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          任务编号: PD20260110001
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    一号仓库A区
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    2026-01-10 14:30
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                      进行中
-                    </span>
-                  </td>
-                </tr>
-                {/* 历史盘点记录自动删除 */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <i className="fa-solid fa-trash-alt text-amber-600 mr-3"></i>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          历史盘点记录自动删除
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          删除了2025年7月10日前的所有记录
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    系统管理
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    2026-01-10 00:05
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      成功
-                    </span>
-                  </td>
-                </tr>
-                {/* 人员权限变动 - 增加新用户 */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <i className="fa-solid fa-user-plus text-purple-600 mr-3"></i>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          增加新用户
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          用户名: zhangwei, 角色: 仓库管理员
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    系统管理
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    2026-01-09 16:45
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      成功
-                    </span>
-                  </td>
-                </tr>
-                {/* 人员权限变动 - 权限变更 */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <i className="fa-solid fa-key text-blue-600 mr-3"></i>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          用户权限变更
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          用户名: lili, 旧角色: 操作员 → 新角色: 高级操作员
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    系统管理
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    2026-01-08 11:20
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      成功
-                    </span>
-                  </td>
-                </tr>
-                {/* 最近下发的盘点任务 */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <i className="fa-solid fa-tasks text-green-600 mr-3"></i>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          下发盘点任务
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          任务编号: PD20260108002
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    二号仓库B区
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    2026-01-08 09:15
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      已完成
-                    </span>
-                  </td>
-                </tr>
+                {renderOperationLogsTable()}
               </tbody>
             </table>
           </div>
+
+          {operationLogs.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-gray-100 text-sm text-gray-500 flex justify-between">
+              <span>显示最近 {operationLogs.length} 条记录（6个月内）</span>
+              <span>最后更新: {new Date().toLocaleTimeString("zh-CN")}</span>
+            </div>
+          )}
         </div>
 
         {/* 系统公告 */}
@@ -542,4 +859,6 @@ export default function Dashboard() {
       </footer>
     </div>
   );
-}
+};
+
+export default Dashboard;

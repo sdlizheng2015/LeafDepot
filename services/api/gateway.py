@@ -1,16 +1,16 @@
 """
 Gateway服务 - 向后兼容入口
 """
-from services.api import custom_utils
 import warnings
 import asyncio
 import os
 import time
 import json
 import logging
+import glob
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, status, Body
 from fastapi.responses import JSONResponse, Response
@@ -48,9 +48,190 @@ logger.info(f"日志文件保存路径: {_log_filename}")
 # 导出供其他函数使用
 debug_log_dir = _debug_log_dir
 
+# 操作记录存储根目录
+OPERATION_LOGS_DIR = debug_log_dir / "operation_logs"
+OPERATION_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# 创建各类型子目录
+LOG_TYPES = ["inventory", "user_login",
+             "user_management", "system_cleanup", "other"]
+for log_type in LOG_TYPES:
+    (OPERATION_LOGS_DIR / log_type).mkdir(parents=True, exist_ok=True)
+
+
+class OperationLog(BaseModel):
+    """操作记录模型"""
+    id: str  # 格式: YYYYMMDD_HHMMSS_xxx
+    timestamp: str  # ISO格式时间戳
+    operation_type: str  # 操作类型
+    user_id: Optional[str] = None  # 操作用户ID
+    user_name: Optional[str] = None  # 操作用户名
+    action: str  # 具体动作
+    target: Optional[str] = None  # 操作目标（如任务ID、用户名）
+    status: str  # 成功/失败/进行中
+    details: Dict[str, Any] = {}  # 详细数据
+    ip_address: Optional[str] = None  # 操作IP
+    metadata: Dict[str, Any] = {}  # 元数据
+
+
+def generate_operation_id() -> str:
+    """生成操作记录ID"""
+    return datetime.now().strftime("%Y%m%d_%H%M%S_") + str(int(time.time() * 1000))[-3:]
+
+
+def save_operation_log(operation_log: OperationLog):
+    """保存操作记录到文件"""
+    try:
+        # 根据类型选择目录
+        log_type = operation_log.operation_type
+        if log_type not in LOG_TYPES:
+            log_type = "other"
+
+        log_dir = OPERATION_LOGS_DIR / log_type
+
+        # 创建文件名
+        filename = f"{operation_log.id}.json"
+        filepath = log_dir / filename
+
+        # 保存为JSON
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(operation_log.dict(), f, ensure_ascii=False, indent=2)
+
+        logger.info(f"操作记录已保存: {filepath}")
+        return True
+    except Exception as e:
+        logger.error(f"保存操作记录失败: {str(e)}")
+        return False
+
+
+def log_operation(
+    operation_type: str,
+    action: str,
+    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
+    target: Optional[str] = None,
+    status: str = "success",
+    details: Optional[Dict[str, Any]] = None,
+    ip_address: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None
+):
+    """记录操作的辅助函数"""
+    operation_log = OperationLog(
+        id=generate_operation_id(),
+        timestamp=datetime.now().isoformat(),
+        operation_type=operation_type,
+        user_id=user_id,
+        user_name=user_name,
+        action=action,
+        target=target,
+        status=status,
+        details=details or {},
+        ip_address=ip_address,
+        metadata=metadata or {}
+    )
+
+    return save_operation_log(operation_log)
+
+
+def get_recent_operations(limit: int = 5, days: int = 180) -> List[Dict[str, Any]]:
+    """
+    获取最近的操作记录
+
+    Args:
+        limit: 返回数量限制
+        days: 查询天数（默认180天，约6个月）
+    """
+    try:
+        all_operations = []
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        # 遍历所有类型目录
+        for log_type in LOG_TYPES:
+            log_dir = OPERATION_LOGS_DIR / log_type
+            if not log_dir.exists():
+                continue
+
+            # 查找所有JSON文件
+            json_files = list(log_dir.glob("*.json"))
+
+            for json_file in json_files:
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+
+                    # 检查时间是否在有效期内
+                    log_time_str = data.get("timestamp", "")
+                    if log_time_str:
+                        try:
+                            log_time = datetime.fromisoformat(
+                                log_time_str.replace('Z', '+00:00'))
+                            if log_time < cutoff_date:
+                                continue  # 跳过过期记录
+                        except:
+                            pass  # 如果时间解析失败，仍然包含
+
+                    all_operations.append(data)
+                except Exception as e:
+                    logger.warning(f"读取操作记录文件失败 {json_file}: {str(e)}")
+                    continue
+
+        # 按时间倒序排序
+        all_operations.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+        # 限制返回数量
+        return all_operations[:limit]
+
+    except Exception as e:
+        logger.error(f"获取操作记录失败: {str(e)}")
+        return []
+
+
+def get_all_operations(days: int = 180) -> List[Dict[str, Any]]:
+    """获取指定天数内的所有操作记录"""
+    try:
+        all_operations = []
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        # 遍历所有类型目录
+        for log_type in LOG_TYPES:
+            log_dir = OPERATION_LOGS_DIR / log_type
+            if not log_dir.exists():
+                continue
+
+            # 查找所有JSON文件
+            json_files = list(log_dir.glob("*.json"))
+
+            for json_file in json_files:
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+
+                    # 检查时间是否在有效期内
+                    log_time_str = data.get("timestamp", "")
+                    if log_time_str:
+                        try:
+                            log_time = datetime.fromisoformat(
+                                log_time_str.replace('Z', '+00:00'))
+                            if log_time < cutoff_date:
+                                continue  # 跳过过期记录
+                        except:
+                            pass  # 如果时间解析失败，仍然包含
+
+                    all_operations.append(data)
+                except Exception as e:
+                    logger.warning(f"读取操作记录文件失败 {json_file}: {str(e)}")
+                    continue
+
+        # 按时间倒序排序
+        all_operations.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        return all_operations
+
+    except Exception as e:
+        logger.error(f"获取所有操作记录失败: {str(e)}")
+        return []
+
+
 # 数据模型定义
-
-
 class TaskStatus(BaseModel):
     """任务状态模型"""
     task_no: str
@@ -85,6 +266,24 @@ class InventoryTaskProgress(BaseModel):
     bin_locations: List[BinLocationStatus]
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+
+
+# 请求模型
+class ScanAndRecognizeRequest(BaseModel):
+    """扫码+识别请求模型"""
+    taskNo: str  # 任务编号
+    binLocation: str  # 库位号
+    pile_id: int = 1  # 堆垛ID，默认为1
+    code_type: str = "ucc128"  # 条码类型，默认ucc128
+
+
+class FrontendLogRequest(BaseModel):
+    """前端日志请求模型"""
+    level: str  # log, info, warn, error
+    message: str
+    timestamp: Optional[str] = None
+    source: Optional[str] = None  # 前端来源标识
+    extra: Optional[Dict[str, Any]] = None  # 额外信息
 
 
 # 创建 FastAPI 应用实例
@@ -264,201 +463,418 @@ def __getattr__(name):
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-######################################### 盘点任务接口 #########################################
-
-
-@app.post("/api/inventory/start-inventory")
-async def start_inventory(request: Request, background_tasks: BackgroundTasks):
-    """启动盘点任务，接收任务编号和储位名称列表"""
+# ========== 在关键操作处添加记录 ==========
+# 辅助函数：根据token获取用户信息
+async def get_user_info_from_token(auth_token: str) -> Dict[str, Any]:
+    """根据authToken获取用户信息"""
     try:
-        data = await request.json()
-        task_no = data.get("taskNo")
-        bin_locations = data.get("binLocations", [])
+        # 调用LMS的auth/token接口
+        lms_auth_url = f"{LMS_BASE_URL}/auth/token?token={auth_token}"
+        response = requests.get(lms_auth_url)
 
-        if not task_no or not bin_locations:
+        if response.status_code == 200:
+            return response.json().get("data", {})
+        else:
+            return {}
+    except Exception:
+        return {}
+
+
+# 1. 在登录接口添加记录
+@app.post("/login")
+async def login(request: Request):
+    """处理前端登录请求，调用LMS的login接口"""
+    try:
+        # 从前端获取用户名和密码
+        data = await request.json()
+        username = data.get("username")
+        password = data.get("password")
+
+        # 验证输入
+        if not username or not password:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="任务编号和储位名称列表不能为空"
+                detail="用户名和密码不能为空"
             )
 
-        logger.info(f"启动盘点任务: {task_no}, 包含 {len(bin_locations)} 个储位")
+        # 调用LMS的login接口
+        lms_login_url = f"{LMS_BASE_URL}/login"
+        headers = {
+            "userCode": username,
+            "password": password
+        }
+        logger.info(f"尝试连接LMS服务: {lms_login_url}")
+        try:
+            response = requests.get(lms_login_url, headers=headers, timeout=5)
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"无法连接到LMS服务 {lms_login_url}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"无法连接到LMS服务，请确保LMS服务正在运行（{LMS_BASE_URL}）"
+            )
+        except requests.exceptions.Timeout:
+            logger.error(f"连接LMS服务超时: {lms_login_url}")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="LMS服务响应超时"
+            )
 
-        # 检查任务是否已存在
-        if task_no in inventory_tasks:
-            existing_task = inventory_tasks[task_no]
-            if existing_task.status in ["running", "init"]:
-                return JSONResponse(
-                    status_code=status.HTTP_200_OK,
-                    content={
-                        "code": 200,
-                        "message": "任务已在执行中",
-                        "data": {
-                            "taskNo": existing_task.task_no,
-                            "status": existing_task.status,
-                        }
-                    }
+        if response.status_code == 200:
+            # 获取LMS返回的token
+            lms_response = response.json()
+            token = lms_response.get("authToken")
+
+            if not token:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="登录成功但未返回authToken"
                 )
 
-        # 在后台异步执行盘点任务
-        background_tasks.add_task(
-            execute_inventory_workflow,
-            task_no=task_no,
-            bin_locations=bin_locations
-        )
-
-        # 1.调用盘点任务下发接口
-
-        # 2.实时接收盘点任务执行状态
-
-        # 3.机器人就位后调用抓图接口
-
-        # 4.抓图成功后调用计算接口，向前端发送图片
-
-        # 5.计算完成后向前端反馈状态，并向前端发送图片
-
-        # 6.调用继续任务接口，重复上述过程，直到全部任务完成
-
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "code": 200,
-                "message": "盘点任务已启动",
-                "data": {
-                    "taskNo": task_no,
-                    "bin_locations": bin_locations
+            # 记录登录操作
+            client_host = request.client.host if request.client else "unknown"
+            log_operation(
+                operation_type="user_login",
+                action="用户登录",
+                user_id=lms_response.get("userId"),
+                user_name=lms_response.get("userName"),
+                status="success",
+                ip_address=client_host,
+                details={
+                    "login_method": "password",
+                    "user_level": lms_response.get("userLevel")
                 }
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"启动盘点任务失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"启动盘点任务失败: {str(e)}"
-        )
-
-
-async def execute_inventory_workflow(task_no: str, bin_locations: List[str]):
-    """执行完整的盘点工作流"""
-    logger.info(f"开始执行盘点工作流: {task_no}, 共 {len(bin_locations)} 个储位")
-
-    # 初始化任务状态
-    task_status = TaskStatus(
-        task_no=task_no,
-        status="init",
-        current_step=0,
-        total_steps=len(bin_locations),
-        start_time=datetime.now().isoformat()
-    )
-
-    # 按任务编号存储任务状态
-    inventory_tasks[task_no] = task_status
-
-    # 初始化每个储位的状态
-    bin_statuses = [
-        BinLocationStatus(
-            bin_location=location,
-            status="pending",
-            sequence=index + 1
-        )
-        for index, location in enumerate(bin_locations)
-    ]
-    inventory_task_bins[task_no] = bin_statuses
-
-    # 更新任务状态为运行中
-    inventory_tasks[task_no].status = "running"
-    inventory_tasks[task_no].current_step = 0
-
-    # 整体下发盘点任务
-    method = "start"
-    await update_robot_status(method)
-
-    submit_result = await submit_inventory_task(task_no, bin_locations)
-
-    try:
-        # 循环处理每个储位
-        for i, bin_location in enumerate(bin_locations):
-            logger.info(f"开始处理储位 {i+1}/{len(bin_locations)}: {bin_location}")
-
-            # 更新当前步骤
-            inventory_tasks[task_no].current_step = i + 1
-
-            # 更新储位状态为运行中
-            if task_no in inventory_task_bins:
-                for bin_status in inventory_task_bins[task_no]:
-                    if bin_status.bin_location == bin_location:
-                        bin_status.status = "running"
-                        break
-
-            # 处理单个储位
-            result = await process_single_bin_location(
-                task_no=task_no,
-                bin_location=bin_location,
-                index=i,
-                total=len(bin_locations)
             )
 
-            # 保存结果
-            if task_no in inventory_task_bins:
-                for bin_status in inventory_task_bins[task_no]:
-                    if bin_status.bin_location == bin_location:
-                        if result["status"] == "success":
-                            bin_status.status = "completed"
-                        else:
-                            bin_status.status = "failed"
-                        break
+            # 返回给前端的响应
+            return {
+                "success": True,
+                "data": {
+                    "userId": lms_response.get("userId"),
+                    "userCode": lms_response.get("userCode"),
+                    "userName": lms_response.get("userName"),
+                    "authToken": token,
+                    "userLevel": lms_response.get("userLevel"),
+                }
+            }
+        else:
+            # 记录登录失败
+            client_host = request.client.host if request.client else "unknown"
+            log_operation(
+                operation_type="user_login",
+                action="用户登录",
+                user_id=username,
+                status="failed",
+                ip_address=client_host,
+                details={
+                    "error": response.text[:200],
+                    "status_code": response.status_code
+                }
+            )
 
-            if result["status"] != "success":
-                inventory_tasks[task_no].status = "failed"
-                raise Exception("储位处理失败，终止任务")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"LMS登录失败: {response.text}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"登录请求失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"登录请求处理失败: {str(e)}"
+        )
 
-        # 更新任务状态为完成
-        inventory_tasks[task_no].status = "completed"
-        inventory_tasks[task_no].current_step = len(bin_locations)
-        inventory_tasks[task_no].end_time = datetime.now().isoformat()
 
-        logger.info(f"盘点任务完成: {task_no}, 成功处理 {len(bin_locations)} 个储位")
+async def submit_inventory_task(task_no: str, bin_locations: List[str]):
+    """下发盘点任务，接收任务编号和储位名称列表"""
+    try:
 
-        # 发送任务完成通知
-        # try:
-        #     async with APIClient(SERVICE_CONFIG["notification_service"]) as client:
-        #         completion_payload = {
-        #             "taskNo": task_no,
-        #             "status": "COMPLETED",
-        #             "totalBins": len(bin_locations),
-        #             "successfulBins": sum(1 for r in inventory_tasks[task_no].results
-        #                                   if r.get("status") == "completed"),
-        #             "failedBins": sum(1 for r in inventory_tasks[task_no].results
-        #                               if r.get("status") == "failed"),
-        #             "completionTime": datetime.now().isoformat(),
-        #             "messageType": "TASK_COMPLETED"
-        #         }
-        #         await client.post("/api/notification/task-complete", json=completion_payload)
-        # except Exception as e:
-        #     logger.warning(f"发送任务完成通知失败: {str(e)}")
+        logger.info(f"下发盘点任务: {task_no}, 储位: {bin_locations}")
+
+        url = f"{RCS_BASE_URL}{RCS_PREFIX}/api/robot/controller/task/submit"
+        headers = {
+            "X-lr-request-id": "ldui",
+            "Content-Type": "application/json"
+        }
+
+        # 构建targetRoute数组
+        target_route = []
+        for index, location in enumerate(bin_locations):
+            route_item = {
+                "seq": index,
+                "type": "ZONE",
+                "code": location,  # 使用储位名称作为目标区域
+            }
+            target_route.append(route_item)
+
+        # 构建请求体 - 单个任务对象
+        request_body = {
+            "taskType": "PF-CTU-COMMON-TEST",
+            "targetRoute": target_route
+        }
+
+        response = requests.post(
+            url, json=request_body, headers=headers, timeout=30)
+
+        if response.status_code == 200:
+            response_data = response.json()
+
+            if response_data.get("code") == "SUCCESS":
+                logger.info(f"储位 {bin_locations} 已发送到机器人系统")
+                return {"success": True, "message": "盘点任务已下发"}
+        else:
+            return {"success": False, "message": "盘点任务下发失败"}
 
     except Exception as e:
-        # 任务执行过程中出现异常
-        if task_no in inventory_tasks:
-            inventory_tasks[task_no].status = "failed"
-            inventory_tasks[task_no].end_time = datetime.now().isoformat()
-        logger.error(f"盘点任务失败: {task_no}, 错误: {str(e)}")
+        logger.error(f"下发盘点任务失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"下发盘点任务失败: {str(e)}"
+        )
 
-        # 发送任务失败通知
-        # try:
-        #     async with APIClient(SERVICE_CONFIG["notification_service"]) as client:
-        #         error_payload = {
-        #             "taskNo": task_no,
-        #             "status": "FAILED",
-        #             "error": str(e),
-        #             "failedAtBin": inventory_tasks[task_no].current_bin,
-        #             "completedBins": len(inventory_tasks[task_no].results),
-        #             "timestamp": datetime.now().isoformat(),
-        #             "messageType": "TASK_FAILED"
-        #         }
-        #         await client.post("/api/notification/task-error", json=error_payload)
-        # except Exception as e2:
-        #     logger.error(f"发送任务失败通知失败: {str(e2)}")
+
+async def continue_inventory_task():
+    """继续盘点任务"""
+    try:
+        logger.info(f"继续执行盘点任务")
+
+        url = f"{RCS_BASE_URL}{RCS_PREFIX}/api/robot/controller/task/extend/continue"
+        headers = {
+            "X-lr-request-id": "ldui",
+            "Content-Type": "application/json"
+        }
+
+        # 构建请求体
+        request_body = {
+            "triggerType": "TASK",
+            "triggerCode": "001"
+        }
+
+        response = requests.post(
+            url, json=request_body, headers=headers, timeout=30)
+
+        if response.status_code == 200:
+            response_data = response.json()
+
+            if response_data.get("code") == "SUCCESS":
+                logger.info(f"继续执行盘点任务命令已发送到机器人系统")
+                return {"success": True, "message": "盘点任务已继续"}
+        else:
+            return {"success": False, "message": "盘点任务下发失败"}
+
+    except Exception as e:
+        logger.error(f"继续盘点任务失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"继续盘点任务失败: {str(e)}"
+        )
+
+
+async def update_robot_status(method: str, data: Optional[Dict] = None):
+    """更新机器人状态并触发事件"""
+    try:
+        from services.api.state.robot_state import get_robot_state_manager
+        manager = get_robot_state_manager()
+        from services.api.config import ROBOT_STATUS_KEY
+
+        # 保存状态信息
+        manager._robot_status_store[ROBOT_STATUS_KEY] = {
+            "method": method,
+            "timestamp": time.time(),
+            "data": data or {}
+        }
+
+        logger.info(f"更新机器人状态: {method}")
+
+        # 设置事件，通知等待的进程
+        manager._status_event.set()
+    except ImportError:
+        logger.warning("机器人状态管理器模块不存在，无法更新状态")
+
+
+async def wait_for_robot_status(expected_method: str, timeout: int = 300):
+    """
+    等待特定机器人状态的同步函数
+
+    这个函数会阻塞直到收到期望的状态或超时
+    """
+    try:
+        from services.api.state.robot_state import get_robot_state_manager
+        from services.api.config import ROBOT_STATUS_KEY
+        manager = get_robot_state_manager()
+
+        logger.info(f"开始等待机器人状态: {expected_method}, 超时: {timeout}秒")
+
+        start_time = time.time()
+
+        # 清除事件，确保我们等待的是新的事件
+        manager._status_event.clear()
+
+        # 检查是否已经有期望的状态
+        if ROBOT_STATUS_KEY in manager._robot_status_store:
+            current_status = manager._robot_status_store[ROBOT_STATUS_KEY]
+            if current_status.get("method") == expected_method:
+                logger.info(f"已存在期望状态: {expected_method}")
+                return current_status
+
+        while True:
+            try:
+                # 等待事件被设置
+                await asyncio.wait_for(manager._status_event.wait(), timeout=1.0)
+
+                # 检查状态
+                if ROBOT_STATUS_KEY in manager._robot_status_store:
+                    current_status = manager._robot_status_store[ROBOT_STATUS_KEY]
+                    logger.info(f"收到机器人状态: {current_status.get('method')}")
+
+                    if current_status.get("method") == expected_method:
+                        logger.info(f"收到期望状态: {expected_method}")
+                        return current_status
+
+                # 重置事件，准备下一次等待
+                manager._status_event.clear()
+
+            except asyncio.TimeoutError:
+                # 检查是否总时间超时
+                elapsed_time = time.time() - start_time
+                if elapsed_time >= timeout:
+                    logger.error(f"等待机器人状态超时: {expected_method}")
+                    raise asyncio.TimeoutError(f"等待 {expected_method} 状态超时")
+
+                # 继续等待
+                continue
+    except ImportError:
+        logger.error("机器人状态管理器模块不存在，无法等待状态")
+        raise
+
+
+async def execute_capture_script(script_path: str, task_no: str, bin_location: str) -> Dict[str, Any]:
+    """
+    在指定 Conda 环境中执行单个抓图脚本
+
+    Args:
+        script_path: 脚本路径
+        task_no: 任务编号
+        bin_location: 储位名称
+        conda_env: Conda 环境名称，默认为 'your_env_name'
+
+    Returns:
+        脚本执行结果
+    """
+    conda_env = "tobacco_env"
+    try:
+        logger.info(f"在 Conda 环境 '{conda_env}' 中执行抓图脚本: {script_path}")
+
+        # 方法1: 使用 conda run 命令
+        # 构建命令行参数
+        cmd = ["conda", "run", "-n", conda_env, "python", script_path,
+               "--task-no", task_no, "--bin-location", bin_location]
+
+        # 方法2: 直接使用 conda 环境中的 python 路径（如果知道路径）
+        # 假设你的 conda 环境路径是已知的
+        # conda_python_path = f"/home/user/anaconda3/envs/{conda_env}/bin/python"
+        # cmd = [conda_python_path, script_path, "--task-no", task_no, "--bin-location", bin_location]
+
+        # 执行脚本
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        # 等待脚本完成
+        stdout, stderr = await process.communicate()
+
+        # 解析结果
+        result = {
+            "script": os.path.basename(script_path),
+            "conda_env": conda_env,
+            "returncode": process.returncode,
+            "stdout": stdout.decode('utf-8') if stdout else "",
+            "stderr": stderr.decode('utf-8') if stderr else "",
+            "success": process.returncode == 0
+        }
+
+        if process.returncode == 0:
+            logger.info(f"脚本执行成功: {script_path} (环境: {conda_env})")
+        else:
+            logger.error(
+                f"脚本执行失败: {script_path}, 错误: {stderr.decode('utf-8')}")
+
+        return result
+
+    except FileNotFoundError as e:
+        logger.error(f"conda 命令未找到或 Conda 环境 '{conda_env}' 不存在: {str(e)}")
+        return {
+            "script": os.path.basename(script_path),
+            "conda_env": conda_env,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": f"Conda 环境 '{conda_env}' 未找到或 conda 命令不可用",
+            "success": False
+        }
+    except Exception as e:
+        logger.error(f"执行脚本失败 {script_path}: {str(e)}")
+        return {
+            "script": os.path.basename(script_path),
+            "conda_env": conda_env,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": str(e),
+            "success": False
+        }
+
+
+async def capture_images_with_scripts(task_no: str, bin_location: str) -> List[Dict[str, Any]]:
+    """
+    按顺序执行三个抓图脚本
+
+    Args:
+        task_no: 任务编号
+        bin_location: 储位名称
+
+    Returns:
+        所有脚本的执行结果
+    """
+    results = []
+
+    for i, script_path in enumerate(CAPTURE_SCRIPTS, 1):
+        logger.info(f"开始执行第 {i} 个抓图脚本: {script_path}")
+
+        try:
+            # 检查脚本文件是否存在
+            if not os.path.exists(script_path):
+                logger.error(f"脚本文件不存在: {script_path}")
+                results.append({
+                    "script": script_path,
+                    "success": False,
+                    "error": "脚本文件不存在"
+                })
+                continue
+
+            # 执行脚本
+            result = await execute_capture_script(script_path, task_no, bin_location)
+            results.append(result)
+
+            # 如果脚本执行失败，可以选择是否继续执行后续脚本
+            if not result["success"]:
+                logger.warning(f"第 {i} 个抓图脚本执行失败，继续执行下一个脚本")
+                # 可以根据业务需求决定是否中断
+                # continue
+
+            # 脚本之间的短暂延迟（可选）
+            if i < len(CAPTURE_SCRIPTS):
+                await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.error(f"执行第 {i} 个抓图脚本时发生异常: {str(e)}")
+            results.append({
+                "script": script_path,
+                "success": False,
+                "error": str(e)
+            })
+
+    return results
 
 
 async def process_single_bin_location(task_no: str, bin_location: str, index: int, total: int):
@@ -573,6 +989,237 @@ async def process_single_bin_location(task_no: str, bin_location: str, index: in
         #     pass
 
     return result
+
+
+async def execute_inventory_workflow(task_no: str, bin_locations: List[str]):
+    """执行完整的盘点工作流"""
+    logger.info(f"开始执行盘点工作流: {task_no}, 共 {len(bin_locations)} 个储位")
+
+    # 初始化任务状态
+    task_status = TaskStatus(
+        task_no=task_no,
+        status="init",
+        current_step=0,
+        total_steps=len(bin_locations),
+        start_time=datetime.now().isoformat()
+    )
+
+    # 按任务编号存储任务状态
+    inventory_tasks[task_no] = task_status
+
+    # 初始化每个储位的状态
+    bin_statuses = [
+        BinLocationStatus(
+            bin_location=location,
+            status="pending",
+            sequence=index + 1
+        )
+        for index, location in enumerate(bin_locations)
+    ]
+    inventory_task_bins[task_no] = bin_statuses
+
+    # 更新任务状态为运行中
+    inventory_tasks[task_no].status = "running"
+    inventory_tasks[task_no].current_step = 0
+
+    # 整体下发盘点任务
+    method = "start"
+    await update_robot_status(method)
+
+    submit_result = await submit_inventory_task(task_no, bin_locations)
+
+    try:
+        # 循环处理每个储位
+        for i, bin_location in enumerate(bin_locations):
+            logger.info(f"开始处理储位 {i+1}/{len(bin_locations)}: {bin_location}")
+
+            # 更新当前步骤
+            inventory_tasks[task_no].current_step = i + 1
+
+            # 更新储位状态为运行中
+            if task_no in inventory_task_bins:
+                for bin_status in inventory_task_bins[task_no]:
+                    if bin_status.bin_location == bin_location:
+                        bin_status.status = "running"
+                        break
+
+            # 处理单个储位
+            result = await process_single_bin_location(
+                task_no=task_no,
+                bin_location=bin_location,
+                index=i,
+                total=len(bin_locations)
+            )
+
+            # 保存结果
+            if task_no in inventory_task_bins:
+                for bin_status in inventory_task_bins[task_no]:
+                    if bin_status.bin_location == bin_location:
+                        if result["status"] == "success":
+                            bin_status.status = "completed"
+                        else:
+                            bin_status.status = "failed"
+                        break
+
+            if result["status"] != "success":
+                inventory_tasks[task_no].status = "failed"
+                raise Exception("储位处理失败，终止任务")
+
+        # 更新任务状态为完成
+        inventory_tasks[task_no].status = "completed"
+        inventory_tasks[task_no].current_step = len(bin_locations)
+        inventory_tasks[task_no].end_time = datetime.now().isoformat()
+
+        logger.info(f"盘点任务完成: {task_no}, 成功处理 {len(bin_locations)} 个储位")
+
+        # 记录任务完成
+        log_operation(
+            operation_type="inventory",
+            action="盘点任务完成",
+            target=task_no,
+            status="completed",
+            details={
+                "task_no": task_no,
+                "bin_locations": bin_locations,
+                "completed_count": len(bin_locations),
+                "xlsx_file": f"./output/history_data/{task_no}.xlsx"
+            }
+        )
+
+        # 发送任务完成通知
+        # try:
+        #     async with APIClient(SERVICE_CONFIG["notification_service"]) as client:
+        #         completion_payload = {
+        #             "taskNo": task_no,
+        #             "status": "COMPLETED",
+        #             "totalBins": len(bin_locations),
+        #             "successfulBins": sum(1 for r in inventory_tasks[task_no].results
+        #                                   if r.get("status") == "completed"),
+        #             "failedBins": sum(1 for r in inventory_tasks[task_no].results
+        #                               if r.get("status") == "failed"),
+        #             "completionTime": datetime.now().isoformat(),
+        #             "messageType": "TASK_COMPLETED"
+        #         }
+        #         await client.post("/api/notification/task-complete", json=completion_payload)
+        # except Exception as e:
+        #     logger.warning(f"发送任务完成通知失败: {str(e)}")
+
+    except Exception as e:
+        # 任务执行过程中出现异常
+        if task_no in inventory_tasks:
+            inventory_tasks[task_no].status = "failed"
+            inventory_tasks[task_no].end_time = datetime.now().isoformat()
+
+        # 记录任务失败
+        log_operation(
+            operation_type="inventory",
+            action="盘点任务失败",
+            target=task_no,
+            status="failed",
+            details={
+                "task_no": task_no,
+                "error": str(e),
+                "failed_at_step": inventory_tasks[task_no].current_step if task_no in inventory_tasks else 0
+            }
+        )
+
+        logger.error(f"盘点任务失败: {task_no}, 错误: {str(e)}")
+
+        # 发送任务失败通知
+        # try:
+        #     async with APIClient(SERVICE_CONFIG["notification_service"]) as client:
+        #         error_payload = {
+        #             "taskNo": task_no,
+        #             "status": "FAILED",
+        #             "error": str(e),
+        #             "failedAtBin": inventory_tasks[task_no].current_bin,
+        #             "completedBins": len(inventory_tasks[task_no].results),
+        #             "timestamp": datetime.now().isoformat(),
+        #             "messageType": "TASK_FAILED"
+        #         }
+        #         await client.post("/api/notification/task-error", json=error_payload)
+        # except Exception as e2:
+        #     logger.error(f"发送任务失败通知失败: {str(e2)}")
+
+
+######################################### 盘点任务接口 #########################################
+
+
+@app.post("/api/inventory/start-inventory")
+async def start_inventory(request: Request, background_tasks: BackgroundTasks):
+    """启动盘点任务，接收任务编号和储位名称列表"""
+    try:
+        data = await request.json()
+        task_no = data.get("taskNo")
+        bin_locations = data.get("binLocations", [])
+
+        if not task_no or not bin_locations:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="任务编号和储位名称列表不能为空"
+            )
+
+        logger.info(f"启动盘点任务: {task_no}, 包含 {len(bin_locations)} 个储位")
+
+        # 检查任务是否已存在
+        if task_no in inventory_tasks:
+            existing_task = inventory_tasks[task_no]
+            if existing_task.status in ["running", "init"]:
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content={
+                        "code": 200,
+                        "message": "任务已在执行中",
+                        "data": {
+                            "taskNo": existing_task.task_no,
+                            "status": existing_task.status,
+                        }
+                    }
+                )
+
+        # 记录盘点任务启动
+        auth_token = request.headers.get("authToken")
+        user_info = await get_user_info_from_token(auth_token) if auth_token else {}
+
+        log_operation(
+            operation_type="inventory",
+            action="启动盘点任务",
+            user_id=user_info.get("userId"),
+            user_name=user_info.get("userName"),
+            target=task_no,
+            status="running",
+            details={
+                "task_no": task_no,
+                "bin_locations": bin_locations,
+                "bin_count": len(bin_locations)
+            }
+        )
+
+        # 在后台异步执行盘点任务
+        background_tasks.add_task(
+            execute_inventory_workflow,
+            task_no=task_no,
+            bin_locations=bin_locations
+        )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "code": 200,
+                "message": "盘点任务已启动",
+                "data": {
+                    "taskNo": task_no,
+                    "bin_locations": bin_locations
+                }
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"启动盘点任务失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"启动盘点任务失败: {str(e)}"
+        )
 
 
 @app.get("/api/inventory/progress")
@@ -727,15 +1374,6 @@ async def get_task_detail(taskNo: str, binLocation: str):
         )
 
 
-# 请求模型
-class ScanAndRecognizeRequest(BaseModel):
-    """扫码+识别请求模型"""
-    taskNo: str  # 任务编号
-    binLocation: str  # 库位号
-    pile_id: int = 1  # 堆垛ID，默认为1
-    code_type: str = "ucc128"  # 条码类型，默认ucc128
-
-
 @app.post("/api/inventory/scan-and-recognize")
 async def scan_and_recognize(request: ScanAndRecognizeRequest = Body(...)):
     """
@@ -745,12 +1383,6 @@ async def scan_and_recognize(request: ScanAndRecognizeRequest = Body(...)):
     Args:
         request: ScanAndRecognizeRequest对象，包含taskNo、binLocation、pile_id和code_type
     """
-    if not DETECT_MODULE_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="检测模块未可用，请检查模块导入"
-        )
-
     try:
         project_root = Path(__file__).parent.parent.parent
 
@@ -758,159 +1390,236 @@ async def scan_and_recognize(request: ScanAndRecognizeRequest = Body(...)):
         image_path = f"{request.taskNo}/{request.binLocation}/3d_camera/"
         image_dir = project_root / "capture_img" / image_path
 
-        # 严格检查 capture_img 下的路径是否存在
-        if not image_dir.exists() or not image_dir.is_dir():
-            logger.error(f"图片目录不存在: {image_dir}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"图片目录不存在: capture_img/{image_path}。请确保该路径下存在图片文件。"
-            )
-
         recognition_time = datetime.now().isoformat()
         results = {
             "taskNo": request.taskNo,
             "binLocation": request.binLocation,
             "recognition_time": recognition_time,
             "detect_result": None,
-            "barcode_result": None
+            "barcode_result": None,
+            "photos": []  # 添加照片路径数组
         }
 
-        # 1. 执行Detect模块
+        # 查找并返回照片路径（无论检测模块是否可用）
         try:
-            logger.info(
-                f"开始执行Detect模块识别: {request.taskNo}/{request.binLocation}")
-
-            # 查找目录中的图片文件
+            photos = []
             image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
-            image_files = []
 
-            # 优先查找常见文件名
-            common_names = ['main', 'raw', 'image', 'img', 'photo']
-            for name in common_names:
+            # 优先查找主图 (3d_camera 目录)
+            main_images = []
+            if image_dir.exists():
                 for ext in image_extensions:
-                    common_file = image_dir / f"{name}{ext}"
-                    if common_file.exists():
-                        image_files.append(common_file)
+                    # 查找常见的文件名
+                    for common_name in ['main', 'MAIN', 'raw', 'RAW', 'image', 'IMAGE']:
+                        main_file = image_dir / f"{common_name}{ext}"
+                        if main_file.exists():
+                            # 构建相对于 capture_img 的路径
+                            relative_path = f"{request.taskNo}/{request.binLocation}/3d_camera/{common_name.upper()}{ext}"
+                            main_images.append(f"/{relative_path}")
+                            logger.info(f"找到主图: {relative_path}")
+                            break
+                    if main_images:
                         break
-                if image_files:
-                    break
 
-            # 如果没找到，查找所有图片
-            if not image_files:
-                for ext in image_extensions:
-                    image_files.extend(list(image_dir.glob(f"*{ext}")))
+                # 如果没有找到常见文件名，查找第一张图片
+                if not main_images:
+                    for ext in image_extensions:
+                        image_files = list(image_dir.glob(f"*{ext}"))
+                        if image_files:
+                            main_file = image_files[0]
+                            relative_path = f"{request.taskNo}/{request.binLocation}/3d_camera/{main_file.name}"
+                            photos.append(f"/{relative_path}")
+                            logger.info(f"找到主图: {relative_path}")
+                            break
+
+                photos.extend(main_images)
+
+                # 查找深度图 (depth 目录)
+                depth_dir = project_root / "capture_img" / \
+                    f"{request.taskNo}/{request.binLocation}/depth"
+                if depth_dir.exists():
+                    for ext in image_extensions:
+                        # 查找常见的文件名
+                        for common_name in ['color', 'COLOR', 'depth', 'DEPTH']:
+                            depth_file = depth_dir / f"{common_name}{ext}"
+                            if depth_file.exists():
+                                relative_path = f"{request.taskNo}/{request.binLocation}/depth/{common_name.upper()}{ext}"
+                                photos.append(f"/{relative_path}")
+                                logger.info(f"找到深度图: {relative_path}")
+                                break
+                        if len(photos) > len(main_images):  # 已经找到深度图
+                            break
+
+                        # 如果没有找到常见文件名，查找第一张图片
+                        depth_files = list(depth_dir.glob(f"*{ext}"))
+                        if depth_files and len(photos) == len(main_images):
+                            depth_file = depth_files[0]
+                            relative_path = f"{request.taskNo}/{request.binLocation}/depth/{depth_file.name}"
+                            photos.append(f"/{relative_path}")
+                            logger.info(f"找到深度图: {relative_path}")
+                            break
+
+            results["photos"] = photos
+            logger.info(f"共找到 {len(photos)} 张图片")
+
+        except Exception as e:
+            logger.error(f"查找照片路径失败: {str(e)}", exc_info=True)
+            results["photos"] = []  # 失败时返回空数组，不中断流程
+
+        # 如果检测模块可用，执行识别
+        if DETECT_MODULE_AVAILABLE:
+            # 严格检查 capture_img 下的路径是否存在
+            if not image_dir.exists() or not image_dir.is_dir():
+                logger.error(f"图片目录不存在: {image_dir}")
+                # 即使目录不存在，也返回照片路径（为空）
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content={
+                        "code": 200,
+                        "message": "图片目录不存在，但返回了照片路径信息",
+                        "data": results
+                    }
+                )
+
+            # 1. 执行Detect模块
+            try:
+                logger.info(
+                    f"开始执行Detect模块识别: {request.taskNo}/{request.binLocation}")
+
+                # 查找目录中的图片文件
+                image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
+                image_files = []
+
+                # 优先查找常见文件名
+                common_names = ['main', 'raw', 'image', 'img', 'photo']
+                for name in common_names:
+                    for ext in image_extensions:
+                        common_file = image_dir / f"{name}{ext}"
+                        if common_file.exists():
+                            image_files.append(common_file)
+                            break
                     if image_files:
                         break
 
-            if not image_files:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"在路径 {image_dir} 中未找到图片文件"
-                )
+                # 如果没找到，查找所有图片
+                if not image_files:
+                    for ext in image_extensions:
+                        image_files.extend(list(image_dir.glob(f"*{ext}")))
+                        if image_files:
+                            break
 
-            image_path_for_detect = str(image_files[0])
-
-            # 从输入路径加载深度图 depth.jpg
-            depth_image_path = image_dir / "depth.jpg"
-            depth_image_path_for_detect = None
-            if depth_image_path.exists():
-                depth_image_path_for_detect = str(depth_image_path)
-                logger.info(f"找到深度图文件: {depth_image_path_for_detect}")
-            else:
-                logger.warning(f"深度图文件不存在: {depth_image_path}，将不使用深度图")
-
-            # 构建debug输出目录: debug/{taskNo}/{binLocation}/
-            debug_output_dir = project_root / "debug" / request.taskNo / request.binLocation
-            debug_output_dir.mkdir(parents=True, exist_ok=True)
-
-            # 创建日志文件处理器，将算法日志保存到debug目录
-            log_file_path = debug_output_dir / \
-                f"debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-            file_handler = logging.FileHandler(
-                str(log_file_path), encoding='utf-8')
-            file_handler.setLevel(logging.DEBUG)
-            file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-            file_handler.setFormatter(file_formatter)
-
-            # 添加文件处理器到logger（临时添加，执行完后移除）
-            logger.addHandler(file_handler)
-
-            try:
-                logger.info(f"Debug输出目录: {debug_output_dir}")
-                logger.info(f"Debug日志文件: {log_file_path}")
-                logger.info(f"使用主图片: {image_path_for_detect}")
-                if depth_image_path_for_detect:
-                    logger.info(f"使用深度图: {depth_image_path_for_detect}")
-
-                # 重定向stdout和stderr到日志文件，捕获count_boxes的print输出
-                import io
-                from contextlib import redirect_stdout, redirect_stderr
-
-                # 创建一个类，将写入操作转换为日志记录
-                class LogWriter:
-                    def __init__(self, logger_instance, level=logging.INFO):
-                        self.logger = logger_instance
-                        self.level = level
-                        self.buffer = ""
-
-                    def write(self, message):
-                        if message.strip():  # 忽略空行
-                            self.buffer += message
-                            # 检查是否有完整的行
-                            while '\n' in self.buffer:
-                                line, self.buffer = self.buffer.split('\n', 1)
-                                if line.strip():
-                                    self.logger.log(self.level, line.strip())
-
-                    def flush(self):
-                        if self.buffer.strip():
-                            self.logger.log(self.level, self.buffer.strip())
-                            self.buffer = ""
-
-                log_writer = LogWriter(logger, logging.INFO)
-
-                # 执行count_boxes，同时捕获其print输出
-                with redirect_stdout(log_writer), redirect_stderr(log_writer):
-                    total_count = count_boxes(
-                        image_path=image_path_for_detect,
-                        pile_id=request.pile_id,
-                        depth_image_path=depth_image_path_for_detect,
-                        enable_debug=False,
-                        enable_visualization=False,
-                        output_dir=str(debug_output_dir)
+                if not image_files:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"在路径 {image_dir} 中未找到图片文件"
                     )
 
-                logger.info(f"Detect模块识别完成，箱数: {total_count}")
+                image_path_for_detect = str(image_files[0])
 
-                results["detect_result"] = {
-                    "image_path": image_path_for_detect,
-                    "pile_id": request.pile_id,
-                    "total_count": total_count,
-                    "status": "success"
-                }
+                # 从输入路径加载深度图 depth.jpg
+                depth_image_path = image_dir / "depth.jpg"
+                depth_image_path_for_detect = None
+                if depth_image_path.exists():
+                    depth_image_path_for_detect = str(depth_image_path)
+                    logger.info(f"找到深度图文件: {depth_image_path_for_detect}")
+                else:
+                    logger.warning(f"深度图文件不存在: {depth_image_path}，将不使用深度图")
 
+                # 构建debug输出目录: debug/{taskNo}/{binLocation}/
+                debug_output_dir = project_root / "debug" / request.taskNo / request.binLocation
+                debug_output_dir.mkdir(parents=True, exist_ok=True)
+
+                # 创建日志文件处理器，将算法日志保存到debug目录
+                log_file_path = debug_output_dir / \
+                    f"debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                file_handler = logging.FileHandler(
+                    str(log_file_path), encoding='utf-8')
+                file_handler.setLevel(logging.DEBUG)
+                file_formatter = logging.Formatter(
+                    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                )
+                file_handler.setFormatter(file_formatter)
+
+                # 添加文件处理器到logger（临时添加，执行完后移除）
+                logger.addHandler(file_handler)
+
+                try:
+                    logger.info(f"Debug输出目录: {debug_output_dir}")
+                    logger.info(f"Debug日志文件: {log_file_path}")
+                    logger.info(f"使用主图片: {image_path_for_detect}")
+                    if depth_image_path_for_detect:
+                        logger.info(f"使用深度图: {depth_image_path_for_detect}")
+
+                    # 重定向stdout和stderr到日志文件，捕获count_boxes的print输出
+                    import io
+                    from contextlib import redirect_stdout, redirect_stderr
+
+                    # 创建一个类，将写入操作转换为日志记录
+                    class LogWriter:
+                        def __init__(self, logger_instance, level=logging.INFO):
+                            self.logger = logger_instance
+                            self.level = level
+                            self.buffer = ""
+
+                        def write(self, message):
+                            if message.strip():  # 忽略空行
+                                self.buffer += message
+                                # 检查是否有完整的行
+                                while '\n' in self.buffer:
+                                    line, self.buffer = self.buffer.split(
+                                        '\n', 1)
+                                    if line.strip():
+                                        self.logger.log(
+                                            self.level, line.strip())
+
+                        def flush(self):
+                            if self.buffer.strip():
+                                self.logger.log(
+                                    self.level, self.buffer.strip())
+                                self.buffer = ""
+
+                    log_writer = LogWriter(logger, logging.INFO)
+
+                    # 执行count_boxes，同时捕获其print输出
+                    with redirect_stdout(log_writer), redirect_stderr(log_writer):
+                        total_count = count_boxes(
+                            image_path=image_path_for_detect,
+                            pile_id=request.pile_id,
+                            depth_image_path=depth_image_path_for_detect,
+                            enable_debug=False,
+                            enable_visualization=False,
+                            output_dir=str(debug_output_dir)
+                        )
+
+                    logger.info(f"Detect模块识别完成，箱数: {total_count}")
+
+                    results["detect_result"] = {
+                        "image_path": image_path_for_detect,
+                        "pile_id": request.pile_id,
+                        "total_count": total_count,
+                        "status": "success"
+                    }
+
+                except Exception as e:
+                    logger.error(f"Detect模块识别失败: {str(e)}", exc_info=True)
+                    results["detect_result"] = {
+                        "status": "failed",
+                        "error": str(e)
+                    }
+                finally:
+                    # 移除文件处理器，避免日志重复输出
+                    logger.removeHandler(file_handler)
+                    file_handler.close()
+
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error(f"Detect模块识别失败: {str(e)}", exc_info=True)
+                logger.error(f"Detect模块初始化失败: {str(e)}", exc_info=True)
                 results["detect_result"] = {
                     "status": "failed",
                     "error": str(e)
                 }
-            finally:
-                # 移除文件处理器，避免日志重复输出
-                logger.removeHandler(file_handler)
-                file_handler.close()
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Detect模块初始化失败: {str(e)}", exc_info=True)
-            results["detect_result"] = {
-                "status": "failed",
-                "error": str(e)
-            }
 
         # 2. 执行Barcode模块（仅在开关开启时执行）
         if ENABLE_BARCODE and BARCODE_MODULE_AVAILABLE:
@@ -1139,86 +1848,7 @@ async def get_recognition_result(taskNo: str, binLocation: str):
         )
 
 
-######################################### 盘点任务接口 #########################################
-
-
 ######################################### LMS #########################################
-
-
-@app.post("/login")
-async def login(request: Request):
-    """处理前端登录请求，调用LMS的login接口"""
-    try:
-        # 从前端获取用户名和密码
-        data = await request.json()
-        username = data.get("username")
-        password = data.get("password")
-
-        # 验证输入
-        if not username or not password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="用户名和密码不能为空"
-            )
-
-        # 调用LMS的login接口
-        lms_login_url = f"{LMS_BASE_URL}/login"
-        headers = {
-            "userCode": username,
-            "password": password
-        }
-        logger.info(f"尝试连接LMS服务: {lms_login_url}")
-        try:
-            response = requests.get(lms_login_url, headers=headers, timeout=5)
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"无法连接到LMS服务 {lms_login_url}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"无法连接到LMS服务，请确保LMS服务正在运行（{LMS_BASE_URL}）"
-            )
-        except requests.exceptions.Timeout:
-            logger.error(f"连接LMS服务超时: {lms_login_url}")
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="LMS服务响应超时"
-            )
-
-        if response.status_code == 200:
-            # 获取LMS返回的token
-            lms_response = response.json()
-            token = lms_response.get("authToken")
-
-            if not token:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="登录成功但未返回authToken"
-                )
-
-            # 返回给前端的响应
-            return {
-                "success": True,
-                "data": {
-                    "userId": lms_response.get("userId"),
-                    "userCode": lms_response.get("userCode"),
-                    "userName": lms_response.get("userName"),
-                    "authToken": token,
-                    "userLevel": lms_response.get("userLevel"),
-                }
-            }
-        else:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"LMS登录失败: {response.text}"
-            )
-    except HTTPException:
-        # 重新抛出 HTTPException，保持原有的错误信息
-        raise
-    except Exception as e:
-        logger.error(f"登录请求失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"登录请求处理失败: {str(e)}"
-        )
 
 
 @app.get("/auth/token")
@@ -1378,97 +2008,8 @@ async def set_task_results(request: Request):
             detail="提交盘点结果请求处理失败"
         )
 
+
 ######################################### RCS #########################################
-# @app.post("/api/inventory/submit-task")
-# async def submit_inventory_task(request: Request):
-
-
-async def submit_inventory_task(task_no: str, bin_locations: List[str]):
-    """下发盘点任务，接收任务编号和储位名称列表"""
-    try:
-
-        logger.info(f"下发盘点任务: {task_no}, 储位: {bin_locations}")
-
-        url = f"{RCS_BASE_URL}{RCS_PREFIX}/api/robot/controller/task/submit"
-        headers = {
-            "X-lr-request-id": "ldui",
-            "Content-Type": "application/json"
-        }
-
-        # 构建targetRoute数组
-        target_route = []
-        for index, location in enumerate(bin_locations):
-            route_item = {
-                "seq": index,
-                "type": "ZONE",
-                "code": location,  # 使用储位名称作为目标区域
-            }
-            target_route.append(route_item)
-
-        # 构建请求体 - 单个任务对象
-        request_body = {
-            "taskType": "PF-CTU-COMMON-TEST",
-            "targetRoute": target_route
-        }
-
-        response = requests.post(
-            url, json=request_body, headers=headers, timeout=30)
-
-        if response.status_code == 200:
-            response_data = response.json()
-
-            if response_data.get("code") == "SUCCESS":
-                logger.info(f"储位 {bin_locations} 已发送到机器人系统")
-                return {"success": True, "message": "盘点任务已下发"}
-        else:
-            return {"success": False, "message": "盘点任务下发失败"}
-
-    except Exception as e:
-        logger.error(f"下发盘点任务失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"下发盘点任务失败: {str(e)}"
-        )
-
-
-# @app.post("/api/inventory/continue-task")
-# async def continue_inventory_task(request: Request):
-async def continue_inventory_task():
-    """继续盘点任务"""
-    try:
-        logger.info(f"继续执行盘点任务")
-
-        url = f"{RCS_BASE_URL}{RCS_PREFIX}/api/robot/controller/task/extend/continue"
-        headers = {
-            "X-lr-request-id": "ldui",
-            "Content-Type": "application/json"
-        }
-
-        # 构建请求体
-        request_body = {
-            "triggerType": "TASK",
-            "triggerCode": "001"
-        }
-
-        response = requests.post(
-            url, json=request_body, headers=headers, timeout=30)
-
-        if response.status_code == 200:
-            response_data = response.json()
-
-            if response_data.get("code") == "SUCCESS":
-                logger.info(f"继续执行盘点任务命令已发送到机器人系统")
-                return {"success": True, "message": "盘点任务已继续"}
-        else:
-            return {"success": False, "message": "盘点任务下发失败"}
-
-    except Exception as e:
-        logger.error(f"继续盘点任务失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"继续盘点任务失败: {str(e)}"
-        )
-
 
 @app.post("/api/robot/reporter/task")
 async def task_status(request: Request):
@@ -1522,210 +2063,7 @@ async def task_status(request: Request):
         raise HTTPException(status_code=500, detail=f"处理状态反馈失败: {str(e)}")
 
 
-async def update_robot_status(method: str, data: Optional[Dict] = None):
-    """更新机器人状态并触发事件"""
-    # 保存状态信息
-    robot_status_store[STATUS_KEY] = {
-        "method": method,
-        "timestamp": time.time(),
-        "data": data or {}
-    }
-
-    logger.info(f"更新机器人状态: {method}")
-
-    # 设置事件，通知等待的进程
-    status_event.set()
-
-
-async def wait_for_robot_status(expected_method: str, timeout: int = 300):
-    """
-    等待特定机器人状态的同步函数
-
-    这个函数会阻塞直到收到期望的状态或超时
-    """
-    logger.info(f"开始等待机器人状态: {expected_method}, 超时: {timeout}秒")
-
-    start_time = time.time()
-
-    # 清除事件，确保我们等待的是新的事件
-    status_event.clear()
-
-    # 检查是否已经有期望的状态
-    if STATUS_KEY in robot_status_store:
-        current_status = robot_status_store[STATUS_KEY]
-        if current_status.get("method") == expected_method:
-            logger.info(f"已存在期望状态: {expected_method}")
-            return current_status
-
-    while True:
-        try:
-            # 等待事件被设置
-            await asyncio.wait_for(status_event.wait(), timeout=1.0)
-
-            # 检查状态
-            if STATUS_KEY in robot_status_store:
-                current_status = robot_status_store[STATUS_KEY]
-                logger.info(f"收到机器人状态: {current_status.get('method')}")
-
-                if current_status.get("method") == expected_method:
-                    logger.info(f"收到期望状态: {expected_method}")
-                    return current_status
-
-            # 重置事件，准备下一次等待
-            status_event.clear()
-
-        except asyncio.TimeoutError:
-            # 检查是否总时间超时
-            elapsed_time = time.time() - start_time
-            if elapsed_time >= timeout:
-                logger.error(f"等待机器人状态超时: {expected_method}")
-                raise asyncio.TimeoutError(f"等待 {expected_method} 状态超时")
-
-            # 继续等待
-            continue
-
-######################################### 抓图 #########################################
-
-
-async def execute_capture_script(script_path: str, task_no: str, bin_location: str) -> Dict[str, Any]:
-    """
-    在指定 Conda 环境中执行单个抓图脚本
-
-    Args:
-        script_path: 脚本路径
-        task_no: 任务编号
-        bin_location: 储位名称
-        conda_env: Conda 环境名称，默认为 'your_env_name'
-
-    Returns:
-        脚本执行结果
-    """
-    conda_env = "tobacco_env"
-    try:
-        logger.info(f"在 Conda 环境 '{conda_env}' 中执行抓图脚本: {script_path}")
-
-        # 方法1: 使用 conda run 命令
-        # 构建命令行参数
-        cmd = ["conda", "run", "-n", conda_env, "python", script_path,
-               "--task-no", task_no, "--bin-location", bin_location]
-
-        # 方法2: 直接使用 conda 环境中的 python 路径（如果知道路径）
-        # 假设你的 conda 环境路径是已知的
-        # conda_python_path = f"/home/user/anaconda3/envs/{conda_env}/bin/python"
-        # cmd = [conda_python_path, script_path, "--task-no", task_no, "--bin-location", bin_location]
-
-        # 执行脚本
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        # 等待脚本完成
-        stdout, stderr = await process.communicate()
-
-        # 解析结果
-        result = {
-            "script": os.path.basename(script_path),
-            "conda_env": conda_env,
-            "returncode": process.returncode,
-            "stdout": stdout.decode('utf-8') if stdout else "",
-            "stderr": stderr.decode('utf-8') if stderr else "",
-            "success": process.returncode == 0
-        }
-
-        if process.returncode == 0:
-            logger.info(f"脚本执行成功: {script_path} (环境: {conda_env})")
-        else:
-            logger.error(
-                f"脚本执行失败: {script_path}, 错误: {stderr.decode('utf-8')}")
-
-        return result
-
-    except FileNotFoundError as e:
-        logger.error(f"conda 命令未找到或 Conda 环境 '{conda_env}' 不存在: {str(e)}")
-        return {
-            "script": os.path.basename(script_path),
-            "conda_env": conda_env,
-            "returncode": -1,
-            "stdout": "",
-            "stderr": f"Conda 环境 '{conda_env}' 未找到或 conda 命令不可用",
-            "success": False
-        }
-    except Exception as e:
-        logger.error(f"执行脚本失败 {script_path}: {str(e)}")
-        return {
-            "script": os.path.basename(script_path),
-            "conda_env": conda_env,
-            "returncode": -1,
-            "stdout": "",
-            "stderr": str(e),
-            "success": False
-        }
-
-
-async def capture_images_with_scripts(task_no: str, bin_location: str) -> List[Dict[str, Any]]:
-    """
-    按顺序执行三个抓图脚本
-
-    Args:
-        task_no: 任务编号
-        bin_location: 储位名称
-
-    Returns:
-        所有脚本的执行结果
-    """
-    results = []
-
-    for i, script_path in enumerate(CAPTURE_SCRIPTS, 1):
-        logger.info(f"开始执行第 {i} 个抓图脚本: {script_path}")
-
-        try:
-            # 检查脚本文件是否存在
-            if not os.path.exists(script_path):
-                logger.error(f"脚本文件不存在: {script_path}")
-                results.append({
-                    "script": script_path,
-                    "success": False,
-                    "error": "脚本文件不存在"
-                })
-                continue
-
-            # 执行脚本
-            result = await execute_capture_script(script_path, task_no, bin_location)
-            results.append(result)
-
-            # 如果脚本执行失败，可以选择是否继续执行后续脚本
-            if not result["success"]:
-                logger.warning(f"第 {i} 个抓图脚本执行失败，继续执行下一个脚本")
-                # 可以根据业务需求决定是否中断
-                # continue
-
-            # 脚本之间的短暂延迟（可选）
-            if i < len(CAPTURE_SCRIPTS):
-                await asyncio.sleep(0.5)
-
-        except Exception as e:
-            logger.error(f"执行第 {i} 个抓图脚本时发生异常: {str(e)}")
-            results.append({
-                "script": script_path,
-                "success": False,
-                "error": str(e)
-            })
-
-    return results
-
-
 # 前端日志收集接口
-class FrontendLogRequest(BaseModel):
-    """前端日志请求模型"""
-    level: str  # log, info, warn, error
-    message: str
-    timestamp: Optional[str] = None
-    source: Optional[str] = None  # 前端来源标识
-    extra: Optional[Dict[str, Any]] = None  # 额外信息
-
-
 @app.post("/api/log/frontend")
 async def collect_frontend_log(request: FrontendLogRequest = Body(...)):
     """
@@ -1916,8 +2254,12 @@ async def register_user(request: Request):
                 detail="Unauthorized"
             )
 
+        # 获取操作用户信息
+        user_info = await get_user_info_from_token(auth_token)
+
         # 2. 获取请求体数据
         data = await request.json()
+        new_user_name = data.get("userName", "未知用户")
 
         # 3. 调用LMS接口
         lms_register_url = f"{LMS_BASE_URL}/third/api/v1/userManagement/registerUser"
@@ -1929,8 +2271,37 @@ async def register_user(request: Request):
         response = requests.post(lms_register_url, json=data, headers=headers)
 
         if response.status_code == 200:
+            # 记录用户添加操作
+            log_operation(
+                operation_type="user_management",
+                action="添加用户",
+                user_id=user_info.get("userId"),
+                user_name=user_info.get("userName"),
+                target=new_user_name,
+                status="success",
+                details={
+                    "new_user_data": data,
+                    "response": response.json()
+                }
+            )
+
             return response.json()
         else:
+            # 记录操作失败
+            log_operation(
+                operation_type="user_management",
+                action="添加用户",
+                user_id=user_info.get("userId"),
+                user_name=user_info.get("userName"),
+                target=new_user_name,
+                status="failed",
+                details={
+                    "new_user_data": data,
+                    "error": response.text[:200],
+                    "status_code": response.status_code
+                }
+            )
+
             raise HTTPException(
                 status_code=response.status_code,
                 detail=f"LMS注册用户失败: {response.text}"
@@ -1981,10 +2352,59 @@ async def delete_user(request: Request):
             detail="删除用户请求处理失败"
         )
 
+
 ######################################### 历史数据 #########################################
 # OUTPUT_ROOT = Path("/home/ubuntu/Projects/LeafDepot/output")
 # 改用相对路径
 OUTPUT_ROOT = Path(__file__).parent.parent.parent / "output"
+
+
+def parse_task_date_from_filename(filename: str) -> Optional[datetime]:
+    """从任务ID解析日期"""
+    try:
+        # 提取数字部分
+        import re
+        numbers = re.findall(r'\d+', filename)
+
+        if numbers:
+            # 取最长的数字串（可能是日期）
+            longest_num = max(numbers, key=len)
+
+            # 尝试解析为日期
+            if len(longest_num) >= 8:
+                date_str = longest_num[:8]
+                year = int(date_str[:4])
+                month = int(date_str[4:6])
+                day = int(date_str[6:8])
+
+                # 验证日期有效性
+                if 2000 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+                    return datetime(year, month, day)
+
+        # 如果无法解析，尝试从文件名中提取其他格式
+        # 例如：HS2026011817 -> 2026-01-18
+        pattern = r'(\d{4})(\d{2})(\d{2})'
+        match = re.search(pattern, filename)
+        if match:
+            year, month, day = map(int, match.groups())
+            return datetime(year, month, day)
+
+        return None
+
+    except Exception:
+        return None
+
+
+def is_task_expired(task_date: datetime) -> bool:
+    """检查任务是否过期（超过6个月）"""
+    now = datetime.now()
+    six_months_ago = now.replace(year=now.year - (1 if now.month <= 6 else 0),
+                                 month=(now.month - 6) % 12 or 12)
+
+    if six_months_ago.month == 12 and now.month <= 6:
+        six_months_ago = six_months_ago.replace(year=six_months_ago.year - 1)
+
+    return task_date < six_months_ago
 
 
 @app.get("/api/history/tasks")
@@ -2329,58 +2749,6 @@ async def get_history_bin_detail(task_id: str, bin_location: str):
         )
 
 
-# 辅助函数：从文件名解析日期
-def parse_task_date_from_filename(filename: str) -> Optional[datetime]:
-    """从任务ID解析日期"""
-    try:
-        # 提取数字部分
-        import re
-        numbers = re.findall(r'\d+', filename)
-
-        if numbers:
-            # 取最长的数字串（可能是日期）
-            longest_num = max(numbers, key=len)
-
-            # 尝试解析为日期
-            if len(longest_num) >= 8:
-                date_str = longest_num[:8]
-                year = int(date_str[:4])
-                month = int(date_str[4:6])
-                day = int(date_str[6:8])
-
-                # 验证日期有效性
-                if 2000 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
-                    return datetime(year, month, day)
-
-        # 如果无法解析，尝试从文件名中提取其他格式
-        # 例如：HS2026011817 -> 2026-01-18
-        pattern = r'(\d{4})(\d{2})(\d{2})'
-        match = re.search(pattern, filename)
-        if match:
-            year, month, day = map(int, match.groups())
-            return datetime(year, month, day)
-
-        return None
-
-    except Exception:
-        return None
-
-
-# 辅助函数：检查任务是否过期
-def is_task_expired(task_date: datetime) -> bool:
-    """检查任务是否过期（超过6个月）"""
-    now = datetime.now()
-    six_months_ago = now.replace(year=now.year - (1 if now.month <= 6 else 0),
-                                 month=(now.month - 6) % 12 or 12)
-
-    if six_months_ago.month == 12 and now.month <= 6:
-        six_months_ago = six_months_ago.replace(year=six_months_ago.year - 1)
-
-    return task_date < six_months_ago
-
-
-# 在 /api/inventory/image 接口中修改，添加对历史任务图片的支持
-
 @app.get("/api/history/image")
 async def get_history_image(
     taskNo: str,
@@ -2481,6 +2849,266 @@ async def get_history_image(
             detail=f"图片不存在: {filename}",
             headers=headers
         )
+
+
+# 操作记录接口
+@app.get("/api/operation/logs/recent")
+async def get_recent_operation_logs(limit: int = 5):
+    """
+    获取最近的操作记录（默认最近5条，6个月内）
+
+    Args:
+        limit: 返回记录数量，默认5条
+    """
+    try:
+        operations = get_recent_operations(limit=limit, days=180)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "code": 200,
+                "message": "获取操作记录成功",
+                "data": {
+                    "operations": operations,
+                    "total": len(operations),
+                    "limit": limit
+                }
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取操作记录失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取操作记录失败: {str(e)}"
+        )
+
+
+@app.get("/api/operation/logs/all")
+async def get_all_operation_logs(
+    days: int = 180,
+    operation_type: Optional[str] = None,
+    status: Optional[str] = None
+):
+    """
+    获取所有操作记录（可筛选）
+
+    Args:
+        days: 查询天数，默认180天（6个月）
+        operation_type: 操作类型筛选
+        status: 状态筛选
+    """
+    try:
+        operations = get_all_operations(days=days)
+
+        # 应用筛选
+        filtered_operations = operations
+
+        if operation_type:
+            filtered_operations = [op for op in filtered_operations
+                                   if op.get("operation_type") == operation_type]
+
+        if status:
+            filtered_operations = [op for op in filtered_operations
+                                   if op.get("status") == status]
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "code": 200,
+                "message": "获取操作记录成功",
+                "data": {
+                    "operations": filtered_operations,
+                    "total": len(filtered_operations),
+                    "filtered_total": len(operations),
+                    "days": days
+                }
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取操作记录失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取操作记录失败: {str(e)}"
+        )
+
+
+# 5. 历史数据清理接口
+class HistoryCleanupRequest(BaseModel):
+    """历史数据清理请求模型"""
+    cutoff_date: Optional[str] = None  # 截止日期，格式: YYYY-MM-DD
+    days: Optional[int] = 180  # 保留天数，默认180天（6个月）
+
+
+@app.post("/api/history/cleanup")
+async def cleanup_history_data(request: Request):
+    """
+    清理历史数据
+    删除指定天数之前的历史任务文件
+
+    Request body:
+        cutoff_date: 截止日期（可选），格式: YYYY-MM-DD
+        days: 保留天数（可选），默认180天（6个月）
+
+    Returns:
+        code: 状态码
+        message: 消息
+        data: 清理结果
+            cleaned_count: 清理的文件数量
+            cutoff_date: 实际使用的截止日期
+            retention_days: 实际保留天数
+            cleaned_files: 清理的文件列表
+    """
+    try:
+        # 解析请求参数
+        data = await request.json()
+
+        # 获取参数
+        cutoff_date_str = data.get("cutoff_date")
+        days = data.get("days", 180)
+
+        # 计算截止日期
+        if cutoff_date_str:
+            # 使用提供的截止日期
+            try:
+                cutoff_date = datetime.strptime(cutoff_date_str, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"截止日期格式错误，应为 YYYY-MM-DD，实际为: {cutoff_date_str}"
+                )
+        else:
+            # 使用天数计算截止日期
+            cutoff_date = datetime.now() - timedelta(days=days)
+
+        cutoff_date_str = cutoff_date.strftime("%Y-%m-%d")
+        logger.info(f"开始清理历史数据，截止日期: {cutoff_date_str}")
+
+        # 获取历史数据目录
+        history_tasks_dir = OUTPUT_ROOT / "history_data"
+
+        if not history_tasks_dir.exists():
+            logger.warning(f"历史数据目录不存在: {history_tasks_dir}")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "code": 200,
+                    "message": "历史数据目录不存在，无需清理",
+                    "data": {
+                        "cleaned_count": 0,
+                        "cutoff_date": cutoff_date_str,
+                        "retention_days": days,
+                        "cleaned_files": []
+                    }
+                }
+            )
+
+        # 查找所有历史数据文件
+        all_files = list(history_tasks_dir.glob("*.xlsx"))
+        all_files.extend(history_tasks_dir.glob("*.xls"))
+
+        cleaned_files = []
+        cleaned_count = 0
+
+        for file_path in all_files:
+            try:
+                # 从文件名解析任务日期
+                task_date = parse_task_date_from_filename(file_path.stem)
+
+                if task_date is None:
+                    # 如果无法解析日期，跳过该文件
+                    logger.warning(f"无法从文件名解析日期: {file_path.name}")
+                    continue
+
+                # 检查是否需要删除
+                if task_date < cutoff_date:
+                    # 删除文件
+                    file_path.unlink()
+                    cleaned_files.append({
+                        "filename": file_path.name,
+                        "task_date": task_date.isoformat(),
+                        "file_path": str(file_path)
+                    })
+                    cleaned_count += 1
+                    logger.info(
+                        f"已删除历史数据文件: {file_path.name} (日期: {task_date})")
+
+            except Exception as e:
+                logger.error(f"处理文件失败 {file_path.name}: {str(e)}")
+                continue
+
+        # 记录清理操作
+        client_host = request.client.host if request.client else "unknown"
+        log_operation(
+            operation_type="system_cleanup",
+            action="清理历史数据",
+            status="success",
+            ip_address=client_host,
+            details={
+                "cleaned_count": cleaned_count,
+                "cutoff_date": cutoff_date_str,
+                "retention_days": days,
+                "cleaned_files": cleaned_files,
+                "request_ip": client_host
+            }
+        )
+
+        logger.info(f"历史数据清理完成，共删除 {cleaned_count} 个文件")
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "code": 200,
+                "message": f"历史数据清理完成，共删除 {cleaned_count} 个文件",
+                "data": {
+                    "cleaned_count": cleaned_count,
+                    "cutoff_date": cutoff_date_str,
+                    "retention_days": days,
+                    "cleaned_files": cleaned_files
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"清理历史数据失败: {str(e)}")
+
+        # 记录失败操作
+        client_host = request.client.host if request.client else "unknown"
+        log_operation(
+            operation_type="system_cleanup",
+            action="清理历史数据",
+            status="failed",
+            ip_address=client_host,
+            details={
+                "error": str(e),
+                "request_ip": client_host
+            }
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"清理历史数据失败: {str(e)}"
+        )
+
+
+# 6. 添加历史数据清理记录函数
+async def log_history_cleanup(cleaned_count: int, cutoff_date: str, details: Optional[Dict] = None):
+    """记录历史数据清理操作"""
+    log_operation(
+        operation_type="system_cleanup",
+        action="清理历史数据",
+        status="success",
+        details={
+            "cleaned_count": cleaned_count,
+            "cutoff_date": cutoff_date,
+            "retention_days": 180,
+            ** (details or {})
+        }
+    )
+
 
 if __name__ == "__main__":
     # 确保日志配置正确（已经在文件开头配置，这里不再重复配置）
